@@ -67,8 +67,7 @@ class CLICombatInterface(CombatInterface):
                     return alive_enemies[idx]
             except (ValueError, IndexError):
                 pass
-            print(f"  Invalid selection. Choosing {alive_enemies[0]['name']}.")
-            return alive_enemies[0]
+            print(f"  Invalid selection. Enter the number of a target.")
 
     def choose_item(self, state: EngineState) -> int | None:
         usable = state.consumables

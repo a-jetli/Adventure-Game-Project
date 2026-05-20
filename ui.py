@@ -142,11 +142,12 @@ class GameUI:
     # ── context ──────────────────────────────────────────────────────────────
 
     def set_context(self, player_name: str, locations: list[str], items: list[str], npcs: list[str] | None = None):
-        self.player_name = player_name
-        self.known_locations = locations
-        self.known_items = items
-        self.known_descriptors = self._extract_location_descriptors(locations)
-        self.known_npcs = npcs or []
+        with self.lock:
+            self.player_name = player_name
+            self.known_locations = locations
+            self.known_items = items
+            self.known_descriptors = self._extract_location_descriptors(locations)
+            self.known_npcs = npcs or []
 
     def _extract_location_descriptors(self, locations: list[str]) -> list[str]:
         stopwords = {
@@ -217,53 +218,58 @@ class GameUI:
         return self.pending_input or ""
 
     def show_menu(self, title: str, options: list[tuple[str, str]], subtitle: str = "", layout: str = "vertical") -> str:
-        self.menu_title = title
-        self.menu_subtitle = subtitle
-        self.menu_options = options
-        self.menu_layout = layout
-        self.menu_choice = ""
-        self.menu_hover_choice = ""
-        self.menu_button_rects = []
-        self.menu_scroll = 0
-        self.menu_active = True
-        self.awaiting_input = False
+        with self.lock:
+            self.menu_title = title
+            self.menu_subtitle = subtitle
+            self.menu_options = options
+            self.menu_layout = layout
+            self.menu_choice = ""
+            self.menu_hover_choice = ""
+            self.menu_button_rects = []
+            self.menu_scroll = 0
+            self.menu_active = True
+            self.awaiting_input = False
         self.menu_ready.clear()
         self.menu_ready.wait()
-        choice = self.menu_choice
-        self.menu_active = False
-        self.menu_button_rects = []
+        with self.lock:
+            choice = self.menu_choice
+            self.menu_active = False
+            self.menu_button_rects = []
         return choice
 
     def begin_combat_intro(self, title: str, flashes: int = 3, interval: float = 0.12):
-        self.combat_intro_title = title
-        self.combat_intro_visible = True
-        self.combat_intro_timer = 0.0
-        self.combat_intro_interval = interval
-        self.combat_intro_flips_left = max(1, flashes * 2)
-        self.combat_intro_active = True
+        with self.lock:
+            self.combat_intro_title = title
+            self.combat_intro_visible = True
+            self.combat_intro_timer = 0.0
+            self.combat_intro_interval = interval
+            self.combat_intro_flips_left = max(1, flashes * 2)
+            self.combat_intro_active = True
         self.combat_intro_ready.clear()
 
     def wait_for_combat_intro(self):
         self.combat_intro_ready.wait()
 
     def show_combat_hud(self, title: str, status_lines: list[tuple[str, int | None]], options: list[tuple[str, str]], layout: str = "horizontal") -> str:
-        self.combat_title = title
-        self.combat_status_lines = status_lines
-        self.combat_options = options
-        self.combat_layout = layout
-        self.combat_scroll = 0
-        self.combat_choice = ""
-        self.combat_hover_choice = ""
-        self.combat_button_rects = []
-        self.combat_panel_height = 220 if layout == "horizontal" else 340
-        self.combat_active = True
-        self.awaiting_input = False
+        with self.lock:
+            self.combat_title = title
+            self.combat_status_lines = status_lines
+            self.combat_options = options
+            self.combat_layout = layout
+            self.combat_scroll = 0
+            self.combat_choice = ""
+            self.combat_hover_choice = ""
+            self.combat_button_rects = []
+            self.combat_panel_height = 220 if layout == "horizontal" else 340
+            self.combat_active = True
+            self.awaiting_input = False
         self._scroll_to_bottom()  # recalculate with panel height set
         self.combat_ready.clear()
         self.combat_ready.wait()
-        choice = self.combat_choice
-        self.combat_active = False
-        self.combat_button_rects = []
+        with self.lock:
+            choice = self.combat_choice
+            self.combat_active = False
+            self.combat_button_rects = []
         return choice
 
     def end_combat_hud(self):

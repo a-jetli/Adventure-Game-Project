@@ -24,21 +24,25 @@ session_stats = SessionStats()
 MODEL_NARRATIVE = "gpt-5.4-nano"
 MODEL_SUMMARY = "gpt-4o-mini"
 DEBUG_LOG = "logs/debug_narrative.txt"
+DEBUG_LOCK = threading.RLock()
 
 
 # ── debug logging ─────────────────────────────────────────────────────────────
 
 def _debug_log_clear():
-    os.makedirs("logs", exist_ok=True)
-    with open(DEBUG_LOG, "w") as f:
-        f.write("")
+    with DEBUG_LOCK:
+        os.makedirs("logs", exist_ok=True)
+        with open(DEBUG_LOG, "w") as f:
+            f.write("")
 
 
 def _debug_log(turn: int, player_input: str, narrative: str):
-    with open(DEBUG_LOG, "a") as f:
-        f.write(f"\n--- Turn {turn} ---\n")
-        f.write(f"INPUT: {player_input}\n")
-        f.write(f"OUTPUT: {narrative}\n")
+    with DEBUG_LOCK:
+        os.makedirs(os.path.dirname(DEBUG_LOG), exist_ok=True)
+        with open(DEBUG_LOG, "a") as f:
+            f.write(f"\n--- Turn {turn} ---\n")
+            f.write(f"INPUT: {player_input}\n")
+            f.write(f"OUTPUT: {narrative}\n")
 
 
 # ── LLM calls ─────────────────────────────────────────────────────────────────

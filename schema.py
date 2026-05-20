@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Literal
 
 
@@ -26,14 +26,14 @@ class TrinketItem(BaseModel):
 
 
 class InventoryUpdate(BaseModel):
-    weapons_add: list[WeaponItem] = []
-    weapons_remove: list[str] = []
-    armor_add: list[ArmorItem] = []
-    armor_remove: list[str] = []
-    consumables_add: list[ConsumableItem] = []
-    consumables_remove: list[str] = []
-    trinkets_add: list[TrinketItem] = []
-    trinkets_remove: list[str] = []
+    weapons_add: list[WeaponItem] = Field(default_factory=list)
+    weapons_remove: list[str] = Field(default_factory=list)
+    armor_add: list[ArmorItem] = Field(default_factory=list)
+    armor_remove: list[str] = Field(default_factory=list)
+    consumables_add: list[ConsumableItem] = Field(default_factory=list)
+    consumables_remove: list[str] = Field(default_factory=list)
+    trinkets_add: list[TrinketItem] = Field(default_factory=list)
+    trinkets_remove: list[str] = Field(default_factory=list)
 
 
 class EnemyDescriptor(BaseModel):
@@ -48,9 +48,9 @@ class EnemyDescriptor(BaseModel):
 class StateChanges(BaseModel):
     location: str | None = None
     location_is_new: bool = False
-    inventory: InventoryUpdate = InventoryUpdate()
+    inventory: InventoryUpdate = Field(default_factory=InventoryUpdate)
     npc_encountered: str | None = None
-    relationship_delta: dict[str, int] = {}
+    relationship_delta: dict[str, int] = Field(default_factory=dict)
     new_log_needed: bool = False
     combat_triggered: bool = False
     encounter: EnemyDescriptor | None = None
