@@ -1,0 +1,256 @@
+import time
+import re
+from schema import LLMResponse
+from engine import EngineState
+from logs import load_region, load_npc
+from stats import SessionStats, CallRecord
+
+def load_system_prompt() -> str:
+    with open("system_prompt.md", "r") as f:
+        return f.read()
+
+
+def handle_local_command(player_input: str, state: EngineState) -> str | None:
+    cmd = player_input.lower().strip()
+    normalized = re.sub(r"[^a-z0-9\s]", "", cmd)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    words = set(normalized.split())
+
+    negated_subject_words = {
+        "enemy", "enemies", "foe", "foes", "monster", "monsters", "npc", "npcs",
+        "their", "theirs", "his", "her", "hers", "its", "boss", "target"
+    }
+    self_subject_words = {"my", "me", "mine", "i"}
+    has_self_subject = bool(words & self_subject_words)
+    has_other_subject = bool(words & negated_subject_words)
+
+    inventory_intent = (
+        cmd in ("inventory", "inv", "i", "check inventory")
+        or normalized in ("inventory", "inv", "check inventory", "my inventory", "whats in my inventory", "what is in my inventory")
+        or (("inventory" in words or "backpack" in words) and has_self_subject and not has_other_subject)
+    )
+    if inventory_intent:
+        return format_inventory_display(state)
+
+    hp_intent = (
+        cmd in ("hp", "health", "status")
+        or normalized in ("my hp", "my health", "my status", "whats my hp", "what is my hp", "whats my health", "what is my health")
+        or (("hp" in words or "health" in words or "status" in words or "hit points" in normalized) and has_self_subject and not has_other_subject)
+    )
+    if hp_intent:
+        return f"{state.player.name}: {state.hp}/{state.max_hp} HP"
+
+    time_intent = (
+        cmd in ("time", "clock")
+        or normalized in ("what time is it", "whats the time", "tell me the time")
+        or (("time" in words or "clock" in words) and (not words or has_self_subject or "what" in words))
+    )
+    if time_intent:
+        return f"Time: {state._time_label()}"
+
+    location_intent = (
+        cmd in ("location", "where", "where am i")
+        or "where am i" in normalized
+        or normalized in ("my location", "whats my location", "what is my location", "where are we")
+        or ("location" in words and has_self_subject and not has_other_subject)
+    )
+    if location_intent:
+        return f"Location: {state.location}"
+
+    help_intent = (
+        cmd in ("help", "commands")
+        or normalized in ("help me", "show commands", "show me commands", "what are the commands")
+        or (("help" in words or "commands" in words) and not has_other_subject)
+    )
+    if help_intent:
+        return "Commands: inventory, hp, time, location, equip [item], help, quit"
+
+    if cmd.startswith("equip "):
+        item_name = player_input[6:].strip().lower()
+        for w in state.weapons:
+            if w.name.lower() == item_name:
+                state.equipped_weapon = w
+                return f"Equipped: {w.name} (1-{w.damage_range} dmg)"
+        for a in state.armor:
+            if a.name.lower() == item_name:
+                state.equipped_armor = a
+                return f"Equipped: {a.name} ({a.armor_value} armor)"
+        return f"'{player_input[6:].strip()}' not found in inventory."
+
+    return None
+
+
+def format_inventory_display(state: EngineState) -> str:
+    def names(parts):
+        return ", ".join(parts) if parts else "none"
+
+    lines = [
+        "Inventory",
+        "Equipment:",
+        f"- Weapon: {state.equipped_weapon.name} (1-{state.equipped_weapon.damage_range} dmg)",
+        f"- Armor:  {state.equipped_armor.name} ({state.equipped_armor.armor_value} armor)",
+        "Bag:",
+        f"- Weapons: {names([w.name for w in state.weapons])}",
+        f"- Armor: {names([a.name for a in state.armor])}",
+        f"- Consumables: {names([c.name for c in state.consumables])}",
+        f"- Trinkets: {names([t.name for t in state.trinkets])}",
+    ]
+    return "\n".join(lines)
+
+
+def call_llm(client, system_prompt, state, hot_context, player_input, model="gpt-5.4-nano", session_stats=None) -> LLMResponse:
+    context_block = "\n".join(hot_context) if hot_context else "No prior context."
+    retrieved = []
+    if state.location and state.location != "unknown":
+        region_log = load_region(state.location)
+        if region_log:
+            retrieved.append(f"REGION LOG — {state.location}:\n{region_log}")
+    if state.active_npc:
+        npc_log = load_npc(state.active_npc)
+        if npc_log:
+            retrieved.append(f"NPC LOG — {state.active_npc}:\n{npc_log}")
+    retrieved_block = "\n\n".join(retrieved) if retrieved else "No prior logs retrieved."
+
+    user_message = f"""ENGINE STATE:
+{state.to_prompt_string()}
+
+RETRIEVED LOGS:
+{retrieved_block}
+
+RECENT CONTEXT:
+{context_block}
+
+PLAYER INPUT:
+{player_input}"""
+
+    t_start = time.time()
+    failure_type = None
+    retry_succeeded = False
+    input_tokens = 0
+    output_tokens = 0
+    raw = ""
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            max_completion_tokens=4000,
+            reasoning_effort="low",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_message}
+            ]
+        )
+        input_tokens  = response.usage.prompt_tokens
+        output_tokens = response.usage.completion_tokens
+        raw = response.content[0].message.content if hasattr(response, 'content') else response.choices[0].message.content
+
+        try:
+            result = LLMResponse.model_validate_json(raw)
+        except Exception as parse_err:
+            if not raw.strip():
+                failure_type = "empty_response"
+            elif raw.strip()[0] != "{":
+                failure_type = "not_json"
+            else:
+                failure_type = "schema_validation"
+
+            # attempt retry
+            retry_resp = client.chat.completions.create(
+                model=model,
+                max_completion_tokens=4000,
+                reasoning_effort="low",
+                messages=[
+                    {"role": "system",    "content": system_prompt},
+                    {"role": "user",      "content": user_message},
+                    {"role": "assistant", "content": raw},
+                    {"role": "user",      "content": "Your response was not valid JSON matching the required schema. Return only the raw JSON object, no other text."}
+                ]
+            )
+            input_tokens  += retry_resp.usage.prompt_tokens
+            output_tokens += retry_resp.usage.completion_tokens
+            raw = retry_resp.choices[0].message.content
+
+            try:
+                result = LLMResponse.model_validate_json(raw)
+                retry_succeeded = True
+                failure_type = None
+            except Exception:
+                raise
+
+    except Exception as e:
+        latency_ms = (time.time() - t_start) * 1000
+        cost = _compute_cost(model, input_tokens, output_tokens)
+        if session_stats is not None:
+            record = CallRecord(
+                turn=state.session_turn,
+                player_input=player_input[:120],
+                success=False,
+                failure_type=failure_type or "exception",
+                retry_succeeded=False,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+                latency_ms=latency_ms,
+                model=model,
+            )
+            session_stats.record(record)
+        raise
+
+    latency_ms = (time.time() - t_start) * 1000
+    cost = _compute_cost(model, input_tokens, output_tokens)
+    if session_stats is not None:
+        record = CallRecord(
+            turn=state.session_turn,
+            player_input=player_input[:120],
+            success=True,
+            failure_type=None,
+            retry_succeeded=retry_succeeded,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost,
+            latency_ms=latency_ms,
+            model=model,
+        )
+        session_stats.record(record)
+    return result
+
+
+def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    from stats import (COST_PER_INPUT_TOKEN, COST_PER_OUTPUT_TOKEN,
+                       SUMMARY_INPUT_TOKEN, SUMMARY_OUTPUT_TOKEN)
+    if "mini" in model.lower():
+        return input_tokens * SUMMARY_INPUT_TOKEN + output_tokens * SUMMARY_OUTPUT_TOKEN
+    return input_tokens * COST_PER_INPUT_TOKEN + output_tokens * COST_PER_OUTPUT_TOKEN
+
+
+def summarize_context(client, hot_context: list[str], model="gpt-4o-mini", session_stats=None) -> str:
+    oldest = hot_context[:3]
+    block = "\n".join(oldest)
+    t_start = time.time()
+    response = client.chat.completions.create(
+        model=model,
+        max_tokens=200,
+        temperature=0.3,
+        messages=[
+            {"role": "system", "content": "You summarize game session events into a single concise paragraph. Plain prose only. No bullet points. Preserve named entities, locations, items found, and decisions made. Discard atmosphere and description."},
+            {"role": "user",   "content": f"Summarize these game turns into one short paragraph:\n\n{block}"}
+        ]
+    )
+    latency_ms = (time.time() - t_start) * 1000
+    if session_stats is not None:
+        from stats import SUMMARY_INPUT_TOKEN, SUMMARY_OUTPUT_TOKEN
+        cost = response.usage.prompt_tokens * SUMMARY_INPUT_TOKEN + response.usage.completion_tokens * SUMMARY_OUTPUT_TOKEN
+        record = CallRecord(
+            turn=-1,
+            player_input="[summarization]",
+            success=True,
+            failure_type=None,
+            retry_succeeded=False,
+            input_tokens=response.usage.prompt_tokens,
+            output_tokens=response.usage.completion_tokens,
+            cost_usd=cost,
+            latency_ms=latency_ms,
+            model=model,
+        )
+        session_stats.record(record)
+    return f"[Summary of earlier events]: {response.choices[0].message.content.strip()}"

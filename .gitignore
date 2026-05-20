@@ -1,0 +1,9 @@
+.env
+key.txt
+__pycache__/
+*.pyc
+*.pyo
+logs/
+.DS_Store
+test_script.md
+theorycrafting.txt
