@@ -5,5 +5,4 @@ __pycache__/
 *.pyo
 logs/
 .DS_Store
-test_script.md
 theorycrafting.txt
