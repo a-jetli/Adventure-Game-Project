@@ -63,7 +63,14 @@ def handle_local_command(player_input: str, state: EngineState) -> str | None:
         or (("help" in words or "commands" in words) and not has_other_subject)
     )
     if help_intent:
-        return "Commands: inventory, hp, time, location, equip [item], help, quit"
+        return "Commands: inventory, hp, time, location, equip [item], use [item], quests, help, quit"
+
+    quest_intent = (
+        cmd in ("quests", "quest", "journal", "quest log", "questlog")
+        or normalized in ("my quests", "show quests", "quest log", "show quest log")
+    )
+    if quest_intent:
+        return format_quest_log(state)
 
     if cmd.startswith("equip "):
         item_name = player_input[6:].strip().lower()
@@ -76,6 +83,29 @@ def handle_local_command(player_input: str, state: EngineState) -> str | None:
                 state.equipped_armor = a
                 return f"Equipped: {a.name} ({a.armor_value} armor)"
         return f"'{player_input[6:].strip()}' not found in inventory."
+
+    if cmd.startswith("use "):
+        item_name = player_input[4:].strip()
+        item_lower = item_name.lower()
+        match = None
+        match_idx = -1
+        for idx, c in enumerate(state.consumables):
+            if c.name.lower() == item_lower:
+                match = c
+                match_idx = idx
+                break
+        if match is None:
+            return f"'{item_name}' isn't something you can use."
+        # Mechanical effects (heal/harm/maxhp/buff) are deterministic, so the
+        # engine resolves them locally with no API call and consumes the item.
+        result = state.apply_consumable_effect(match)
+        if result is not None:
+            state.consumables.pop(match_idx)
+            return result
+        # Purely narrative effect: return None so the input falls through to the
+        # normal LLM turn, which narrates it and decides whether the item is
+        # consumed (via inventory.consumables_remove).
+        return None
 
     return None
 
@@ -95,6 +125,28 @@ def format_inventory_display(state: EngineState) -> str:
         f"- Consumables: {names([c.name for c in state.consumables])}",
         f"- Trinkets: {names([t.name for t in state.trinkets])}",
     ]
+    return "\n".join(lines)
+
+
+def format_quest_log(state: EngineState) -> str:
+    if not state.quests:
+        return "Quest Log\nNo quests."
+    active = [q for q in state.quests if q.status == "active"]
+    completed = [q for q in state.quests if q.status == "completed"]
+    failed = [q for q in state.quests if q.status == "failed"]
+    lines = ["Quest Log"]
+    if active:
+        lines.append("Active:")
+        for q in active:
+            lines.append(f"  [{q.title}] {q.description}")
+    if completed:
+        lines.append("Completed:")
+        for q in completed:
+            lines.append(f"  [{q.title}] {q.description}")
+    if failed:
+        lines.append("Failed:")
+        for q in failed:
+            lines.append(f"  [{q.title}] {q.description}")
     return "\n".join(lines)
 
 
@@ -254,3 +306,47 @@ def summarize_context(client, hot_context: list[str], model="gpt-4o-mini", sessi
         )
         session_stats.record(record)
     return f"[Summary of earlier events]: {response.choices[0].message.content.strip()}"
+
+
+def generate_recap(client, state, hot_context: list[str], model="gpt-4o-mini", session_stats=None) -> str | None:
+    """A short 'previously...' recap shown when a save is resumed. Returns None
+    on failure so a recap is never allowed to block loading the game."""
+    recent = "\n".join(hot_context[-6:]) if hot_context else "No prior events recorded."
+    active_quests = ", ".join(q.title for q in state.quests if q.status == "active") or "none"
+    user_message = (
+        f"Returning player: {state.player.name}\n"
+        f"Current location: {state.location}\n"
+        f"Open objectives: {active_quests}\n"
+        f"Recent events (oldest to newest):\n{recent}\n\n"
+        "Write the recap."
+    )
+    try:
+        t_start = time.time()
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=180,
+            temperature=0.4,
+            messages=[
+                {"role": "system", "content": "You write a brief 'previously...' recap for a player returning to a text RPG. Two to four sentences, second person, present tense. Remind them where they are, what just happened, and any thread left open. Plain prose, no preamble, no bullet points, no quotation marks around the whole thing."},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        latency_ms = (time.time() - t_start) * 1000
+        if session_stats is not None:
+            from stats import SUMMARY_INPUT_TOKEN, SUMMARY_OUTPUT_TOKEN
+            cost = response.usage.prompt_tokens * SUMMARY_INPUT_TOKEN + response.usage.completion_tokens * SUMMARY_OUTPUT_TOKEN
+            session_stats.record(CallRecord(
+                turn=-1,
+                player_input="[recap]",
+                success=True,
+                failure_type=None,
+                retry_succeeded=False,
+                input_tokens=response.usage.prompt_tokens,
+                output_tokens=response.usage.completion_tokens,
+                cost_usd=cost,
+                latency_ms=latency_ms,
+                model=model,
+            ))
+        return response.choices[0].message.content.strip()
+    except Exception:
+        return None

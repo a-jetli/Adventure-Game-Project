@@ -90,21 +90,21 @@ def _build_test_cases() -> list[TestCase]:
             ],
         ),
 
-        # ── small action — Type 1 ─────────────────────────────────────────────
+        # ── survey — Type 8 (a look-around earns a full description) ───────────
         TestCase(
-            name="small_action/look_around_is_brief",
-            player_input="I look around.",
+            name="survey/look_around_is_rich",
+            player_input="I look around and take in my surroundings. What's my environment like?",
             state=_make_state(location_is_new=False),
             hot_context=_hot_context_for(["I arrived here", "I examined the gate"]),
             checks=[
-                ("response is short — under 120 words",
-                 lambda r: len(r.narrative.split()) < 120),
-                ("no location change on look-around",
+                ("survey is substantial — at least 60 words",
+                 lambda r: len(r.narrative.split()) >= 60),
+                ("survey spans more than a few sentences",
+                 lambda r: r.narrative.count(".") >= 4),
+                ("no location change on a survey",
                  lambda r: r.state_changes.location is None),
                 ("no combat triggered",
                  lambda r: not r.state_changes.combat_triggered),
-                ("action_type is none or short",
-                 lambda r: r.state_changes.action_type in ("none", "short")),
             ],
         ),
 
@@ -136,6 +136,8 @@ def _build_test_cases() -> list[TestCase]:
             state=_make_state(),
             hot_context=[],
             checks=[
+                ("small action stays brief — under 90 words",
+                 lambda r: len(r.narrative.split()) < 90),
                 ("location not changed on rest",
                  lambda r: r.state_changes.location is None),
                 ("no combat triggered on rest",
@@ -264,6 +266,72 @@ def _build_test_cases() -> list[TestCase]:
                  lambda r: "surge" not in r.narrative.lower()),
                 ("no 'dread' references",
                  lambda r: "dread" not in r.narrative.lower()),
+            ],
+        ),
+
+        # ── quest creation on commitment ─────────────────────────────────────
+        TestCase(
+            name="quest/created_on_commitment",
+            player_input="I agree to help the innkeeper find her missing brother.",
+            state=_make_state(has_npc="the innkeeper"),
+            hot_context=[
+                "[Turn 1] Player: I entered the inn | A tired woman stood behind the bar.",
+                "[Turn 2] Player: I asked what was troubling her | She explained her brother went into the northern woods a week ago and hasn't returned. She begged for help finding him.",
+            ],
+            checks=[
+                ("quest_added is populated",
+                 lambda r: r.state_changes.quest_added is not None),
+                ("quest has non-empty title",
+                 lambda r: r.state_changes.quest_added is not None
+                           and len(r.state_changes.quest_added.title) > 0),
+                ("quest has non-empty description",
+                 lambda r: r.state_changes.quest_added is not None
+                           and len(r.state_changes.quest_added.description) > 0),
+                ("quest status is active",
+                 lambda r: r.state_changes.quest_added is not None
+                           and r.state_changes.quest_added.status == "active"),
+            ],
+        ),
+
+        # ── no quest on mundane action ───────────────────────────────────────
+        TestCase(
+            name="quest/not_created_on_mundane_action",
+            player_input="I pick up a rock.",
+            state=_make_state(),
+            hot_context=[],
+            checks=[
+                ("quest_added is null for mundane action",
+                 lambda r: r.state_changes.quest_added is None),
+            ],
+        ),
+
+        # ── world authoring: pushback on impossible grabs ─────────────────────
+        TestCase(
+            name="agency/no_freebie_legendary_weapon",
+            player_input="I reach down and pick up the godly sword of infinite power lying at my feet.",
+            state=_make_state(),
+            hot_context=[],
+            checks=[
+                ("no legendary weapon conjured into inventory",
+                 lambda r: len(r.state_changes.inventory.weapons_add) == 0),
+                ("if any weapon was added, it is not absurdly powerful",
+                 lambda r: all(w.damage_range <= 20 for w in r.state_changes.inventory.weapons_add)),
+                ("no combat triggered from the grab",
+                 lambda r: not r.state_changes.combat_triggered),
+            ],
+        ),
+
+        # ── item effect: created consumables use a resolvable effect ──────────
+        TestCase(
+            name="items/consumable_effect_is_usable",
+            player_input="I search the alchemist's shelf for something to drink that would heal me.",
+            state=_make_state(),
+            hot_context=[
+                "[Turn 1] Player: I entered the abandoned alchemy shop | Dusty shelves lined the walls, a few stoppered vials still intact.",
+            ],
+            checks=[
+                ("any consumable added has a non-empty effect string",
+                 lambda r: all(c.effect.strip() != "" for c in r.state_changes.inventory.consumables_add)),
             ],
         ),
 

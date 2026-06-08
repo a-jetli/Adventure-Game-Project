@@ -4,30 +4,56 @@ import re
 import time
 
 
-BG_COLOR = (30, 32, 36)
-TEXT_COLOR = (190, 190, 185)
-INPUT_BG = (40, 42, 48)
-INPUT_BORDER = (70, 72, 78)
-INPUT_TEXT = (210, 210, 205)
-INPUT_SELECTION_BG = (72, 92, 130)
-MENU_OVERLAY = (10, 12, 16, 170)
-MENU_PANEL_BG = (28, 31, 36)
-MENU_PANEL_BORDER = (82, 86, 96)
-MENU_BUTTON_BG = (54, 58, 68)
-MENU_BUTTON_HOVER = (74, 80, 94)
-MENU_BUTTON_TEXT = (220, 224, 232)
-PROMPT_COLOR = (130, 135, 120)
-HIGHLIGHT_NAME = (180, 160, 100)
-HIGHLIGHT_LOCATION = (100, 160, 180)
-HIGHLIGHT_ITEM = (140, 180, 120)
-HIGHLIGHT_DESCRIPTOR = (120, 150, 135)
-HIGHLIGHT_NPC = (200, 145, 115)
-HIGHLIGHT_TIME = (155, 135, 185)
-HIGHLIGHT_DANGER = (205, 110, 110)
-HIGHLIGHT_INTERACT = (120, 175, 170)
-HIGHLIGHT_COMBAT = (190, 100, 100)
-SYSTEM_COLOR = (120, 120, 115)
-CURSOR_COLOR = (190, 190, 185)
+# ── base surface ────────────────────────────────────────────────────────────
+BG_COLOR = (20, 22, 27)
+TEXT_COLOR = (220, 223, 229)
+
+# ── input bar ─────────────────────────────────────────────────────────────────
+INPUT_BG = (32, 36, 43)
+INPUT_BORDER = (80, 88, 102)
+INPUT_TEXT = (231, 234, 240)
+INPUT_SELECTION_BG = (60, 96, 152)
+
+# ── menus ─────────────────────────────────────────────────────────────────────
+MENU_OVERLAY = (6, 8, 12, 205)
+MENU_PANEL_BG = (26, 30, 37)
+MENU_PANEL_BORDER = (96, 104, 122)
+MENU_BUTTON_BG = (46, 52, 64)
+MENU_BUTTON_HOVER = (74, 86, 108)
+MENU_BUTTON_TEXT = (230, 234, 242)
+
+# ── accents ───────────────────────────────────────────────────────────────────
+PROMPT_COLOR = (118, 152, 132)
+SYSTEM_COLOR = (134, 142, 154)
+CURSOR_COLOR = (231, 234, 240)
+
+# ── command toolbar (collapsible, top) ──────────────────────────────────────────
+HINT_PANEL_BG = (28, 31, 38, 105)       # faint, sits back in the background
+HINT_PANEL_BORDER = (56, 62, 74, 70)
+HINT_LABEL_COLOR = (116, 130, 150)      # the "[+] Commands" toggle label
+HINT_TEXT_COLOR = (102, 110, 122)       # command tokens, dim
+HINT_EDGE_GAP = 12                      # gap from the window's right/top edge
+HINT_TEXT_GAP = 16                      # gap between narrative text and the widget
+
+# ── narrative highlights ────────────────────────────────────────────────────────
+HIGHLIGHT_NAME = (238, 208, 122)        # the player — warm gold
+HIGHLIGHT_NPC = (240, 164, 118)         # people — orange
+HIGHLIGHT_LOCATION = (122, 198, 230)    # named places — sky blue
+HIGHLIGHT_ITEM = (150, 208, 132)        # carried/known items — green
+HIGHLIGHT_DESCRIPTOR = (168, 188, 168)  # words drawn from place names — sage
+HIGHLIGHT_TIME = (194, 174, 232)        # time of day / light — lavender
+HIGHLIGHT_DANGER = (235, 116, 110)      # violence / threat — red
+HIGHLIGHT_INTERACT = (120, 204, 192)    # usable features — teal
+HIGHLIGHT_DIRECTION = (142, 168, 206)   # compass headings — steel blue
+HIGHLIGHT_NATURE = (180, 196, 120)      # terrain / weather — olive
+HIGHLIGHT_MAGIC = (214, 142, 218)       # the arcane — orchid
+HIGHLIGHT_COMBAT = (236, 126, 120)      # combat log text — red
+
+# base tint for a whole block that describes a newly-entered area — a warm
+# parchment cast so the prose itself reads as "this is a place" while the
+# per-word highlights still show through on top
+AREA_INTRO_COLOR = (214, 205, 180)
+
 PARAGRAPH_GAP = 10
 
 
@@ -93,6 +119,9 @@ class GameUI:
         self.cursor_visible = True
         self.cursor_timer = 0
         self.scroll_offset = 0
+        self.hints_expanded = False
+        self.hint_toggle_rect = pygame.Rect(0, 0, 0, 0)
+        self._hint_cache = None
         self.typewriter_speed = 120
         self.typewriter_timer = 0
         self.running = True
@@ -167,10 +196,11 @@ class GameUI:
 
     # ── public block adders ───────────────────────────────────────────────────
 
-    def add_narrative(self, text: str):
+    def add_narrative(self, text: str, area_intro: bool = False):
         with self.lock:
             highlights = self._build_highlights(text)
-            block = TextBlock(text, TEXT_COLOR, is_player=False, highlights=highlights)
+            base_color = AREA_INTRO_COLOR if area_intro else TEXT_COLOR
+            block = TextBlock(text, base_color, is_player=False, highlights=highlights)
             self.blocks.append(block)
             self._scroll_to_bottom()  # always scroll for new narrative
 
@@ -183,19 +213,24 @@ class GameUI:
 
     def add_system(self, text: str):
         with self.lock:
+            # Check before appending: a tall block (inventory, quest log) grows
+            # content height past the _is_at_bottom tolerance, so checking after
+            # the append would wrongly report "not at bottom" and skip scrolling.
+            was_at_bottom = self._is_at_bottom()
             block = TextBlock(text, SYSTEM_COLOR, is_player=False)
             block.reveal_all()
             self.blocks.append(block)
-            if self._is_at_bottom():  # only scroll if already at bottom
+            if was_at_bottom:  # only scroll if we were already at bottom
                 self._scroll_to_bottom()
 
     def add_combat_text(self, text: str, animate: bool = False):
         with self.lock:
+            was_at_bottom = self._is_at_bottom()
             block = TextBlock(text, HIGHLIGHT_COMBAT, is_player=False)
             if not animate:
                 block.reveal_all()
             self.blocks.append(block)
-            if self._is_at_bottom():  # only scroll if already at bottom
+            if was_at_bottom:  # only scroll if we were already at bottom
                 self._scroll_to_bottom()
 
     def remove_loading_indicator(self):
@@ -424,10 +459,42 @@ class GameUI:
                 for i in range(m.start(), m.end()):
                     if i not in highlights:
                         highlights[i] = HIGHLIGHT_NPC
+        # Order is precedence: earlier groups win a word over later ones, and all
+        # of these lose to the dynamic categories (name/location/item/npc) above.
         keyword_groups = [
-            (HIGHLIGHT_TIME, ["dawn", "morning", "midday", "afternoon", "evening", "night", "midnight"]),
-            (HIGHLIGHT_DANGER, ["blood", "wound", "wounded", "danger", "threat", "ambush", "attack", "hostile", "deadly"]),
-            (HIGHLIGHT_INTERACT, ["door", "gate", "lever", "switch", "altar", "statue", "chest", "bridge", "path"]),
+            (HIGHLIGHT_DANGER, [
+                "blood", "bloody", "wound", "wounded", "wounds", "danger", "dangerous",
+                "threat", "ambush", "attack", "attacks", "hostile", "deadly", "dead",
+                "death", "corpse", "kill", "killed", "slain", "slay", "blade", "sword",
+                "dagger", "knife", "axe", "spear", "arrow", "bow", "poison", "venom",
+                "scream", "screams", "scar", "scarred", "fire", "flame", "flames", "burning",
+            ]),
+            (HIGHLIGHT_MAGIC, [
+                "magic", "magical", "spell", "spells", "rune", "runes", "enchanted",
+                "enchantment", "arcane", "sorcery", "sorcerer", "witch", "wizard", "mage",
+                "curse", "cursed", "ritual", "sigil", "ward", "glyph", "conjure", "summon",
+                "hex", "relic", "talisman", "amulet", "charm",
+            ]),
+            (HIGHLIGHT_TIME, [
+                "dawn", "daybreak", "sunrise", "morning", "midday", "noon", "afternoon",
+                "dusk", "twilight", "sunset", "evening", "nightfall", "night", "midnight",
+                "moon", "moonlight", "moonlit", "starlight", "candlelight", "torchlight",
+            ]),
+            (HIGHLIGHT_INTERACT, [
+                "door", "doors", "gate", "gates", "lever", "switch", "altar", "statue",
+                "chest", "bridge", "stairs", "staircase", "ladder", "well", "lock", "key",
+                "handle", "rope", "trapdoor", "hatch", "shrine", "pedestal", "mechanism", "latch",
+            ]),
+            (HIGHLIGHT_DIRECTION, [
+                "north", "south", "east", "west", "northeast", "northwest", "southeast",
+                "southwest", "northward", "southward", "eastward", "westward",
+            ]),
+            (HIGHLIGHT_NATURE, [
+                "forest", "woods", "tree", "trees", "river", "stream", "creek", "mountain",
+                "mountains", "hill", "hills", "rain", "snow", "wind", "fog", "mist", "mud",
+                "moss", "storm", "thunder", "lightning", "sea", "ocean", "lake", "swamp",
+                "marsh", "meadow", "valley", "cliff", "field", "grass", "roots",
+            ]),
         ]
         for color, words in keyword_groups:
             for keyword in words:
@@ -441,6 +508,7 @@ class GameUI:
 
     def _wrap_text(self, text: str) -> list[tuple[str, bool, int]]:
         all_lines = []
+        max_w = self._wrap_width()
         n = len(text)
         i = 0
 
@@ -470,7 +538,7 @@ class GameUI:
                     word_start_local = local_idx
                     test = current + (" " if current else "") + word
                     w, _ = self.font.size(test)
-                    if w > self.max_text_width and current:
+                    if w > max_w and current:
                         paragraph_lines.append((current, current_start))
                         current = word
                         current_start = paragraph_start + word_start_local
@@ -510,6 +578,46 @@ class GameUI:
                         total += PARAGRAPH_GAP
                 total += 12
             return total
+
+    # ── command toolbar layout (top-right corner) ───────────────────────────────
+
+    def _hints_visible(self) -> bool:
+        return not self.combat_active and not self.menu_active
+
+    def _hint_lines(self) -> list[str]:
+        header = ("[–] Commands" if self.hints_expanded else "[+] Commands")
+        if not self.hints_expanded:
+            return [header]
+        return [header, "inventory", "hp", "time", "location", "quests",
+                "use [item]", "equip [item]", "help"]
+
+    def _hint_layout(self) -> tuple[int, int, list[str]]:
+        """Returns (widget_w, widget_h, lines), cached per (width, expanded)."""
+        key = (self.width, self.hints_expanded)
+        if self._hint_cache and self._hint_cache[0] == key:
+            return self._hint_cache[1], self._hint_cache[2], self._hint_cache[3]
+        pad = 8
+        line_h = self.font.get_linesize()
+        lines = self._hint_lines()
+        content_w = max(self._measure_text_width(s) for s in lines)
+        widget_w = content_w + pad * 2
+        widget_h = len(lines) * line_h + pad * 2
+        if self.hints_expanded:
+            widget_h += 4  # a little breathing room under the header
+        self._hint_cache = (key, widget_w, widget_h, lines)
+        return widget_w, widget_h, lines
+
+    def _hint_widget_rect(self) -> pygame.Rect:
+        widget_w, widget_h, _ = self._hint_layout()
+        x = self.width - HINT_EDGE_GAP - widget_w
+        return pygame.Rect(x, self.margin_top, widget_w, widget_h)
+
+    def _wrap_width(self) -> int:
+        """Narrative wrap width, inset on the right to clear the hint widget."""
+        if not self._hints_visible():
+            return self.max_text_width
+        widget_left = self._hint_widget_rect().left
+        return max(160, widget_left - HINT_TEXT_GAP - self.margin_left)
 
     def _effective_visible_height(self) -> int:
         if self.combat_active:
@@ -632,6 +740,30 @@ class GameUI:
         if run_chars:
             run_surf = self.font.render("".join(run_chars), True, run_color)
             self.screen.blit(run_surf, (x, y))
+
+    def _render_command_hints(self):
+        pad = 8
+        line_h = self.font.get_linesize()
+        widget_w, widget_h, lines = self._hint_layout()
+        rect = self._hint_widget_rect()
+
+        panel = pygame.Surface((widget_w, widget_h), pygame.SRCALPHA)
+        prect = panel.get_rect()
+        pygame.draw.rect(panel, HINT_PANEL_BG, prect, border_radius=6)
+        pygame.draw.rect(panel, HINT_PANEL_BORDER, prect, 1, border_radius=6)
+        self.screen.blit(panel, rect.topleft)
+
+        x = rect.x + pad
+        y = rect.y + pad
+        for idx, line in enumerate(lines):
+            color = HINT_LABEL_COLOR if idx == 0 else HINT_TEXT_COLOR
+            self.screen.blit(self.font.render(line, True, color), (x, y))
+            y += line_h
+            if idx == 0 and self.hints_expanded:
+                y += 4
+
+        # only the header row toggles; the list area is passive
+        self.hint_toggle_rect = pygame.Rect(rect.x, rect.y, widget_w, pad * 2 + line_h)
 
     def _render_input_bar(self):
         bar_y = self.height - self.input_height - 5
@@ -797,7 +929,7 @@ class GameUI:
         panel_y = self.height - panel_h - 5
         panel_rect = pygame.Rect(self.margin_left - 5, panel_y,
                                  self.width - self.margin_left * 2 + 10, panel_h)
-        pygame.draw.rect(self.screen, (24, 26, 30), panel_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (32, 36, 43), panel_rect, border_radius=6)
         pygame.draw.rect(self.screen, INPUT_BORDER, panel_rect, 1, border_radius=6)
 
         y = panel_y + 10
@@ -1056,6 +1188,16 @@ class GameUI:
                         self.combat_ready.set()
                         break
 
+            if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                    and not self.menu_active and not self.combat_active
+                    and self.hint_toggle_rect.collidepoint(event.pos)):
+                self.hints_expanded = not self.hints_expanded
+                # the text area just changed size; keep the scroll position valid
+                content_h = self._total_content_height()
+                visible_h = self._effective_visible_height()
+                self.scroll_offset = max(0, min(self.scroll_offset, max(0, content_h - visible_h)))
+                continue
+
             if event.type == pygame.MOUSEBUTTONDOWN and not self.menu_active and event.button == 1:
                 if self.input_bar_rect.collidepoint(event.pos):
                     prev_cursor = self.input_cursor_pos
@@ -1093,6 +1235,7 @@ class GameUI:
         if self.combat_active:
             self._render_combat_hud()
         elif not self.menu_active:
+            self._render_command_hints()
             self._render_input_bar()
         else:
             self._render_menu_overlay()

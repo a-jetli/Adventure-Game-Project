@@ -6,7 +6,10 @@ class CombatInterface:
     def show_intro(self, enemy_type: str):
         pass
 
-    def log(self, message: str):
+    def log(self, message: str, animate: bool = False):
+        pass
+
+    def on_player_action_complete(self):
         pass
 
     def choose_action(self, state: EngineState, alive_enemies: list[dict]) -> str:
@@ -27,7 +30,7 @@ class CLICombatInterface(CombatInterface):
         print(f"  COMBAT — {enemy_type}")
         print(f"{'='*40}")
 
-    def log(self, message: str):
+    def log(self, message: str, animate: bool = False):
         print(f"  {message}")
 
     def choose_action(self, state: EngineState, alive_enemies: list[dict]) -> str:
@@ -115,7 +118,8 @@ def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: Combat
 
         if choice == "attack":
             target = interface.choose_target(alive)
-            roll = random.randint(1, state.equipped_weapon.damage_range)
+            weapon_range = max(1, state.equipped_weapon.damage_range + state.damage_buff)
+            roll = random.randint(1, weapon_range)
             damage = max(0, roll - target["armor"])
             target["hp"] = max(0, target["hp"] - damage)
 
@@ -125,7 +129,7 @@ def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: Combat
                 interface.log(f"Your attack glances off {target['name']}'s armor. (rolled {roll} - {target['armor']} armor)")
 
             if target["hp"] <= 0:
-                interface.log(f"{target['name']} falls.")
+                interface.log(f"{target['name']} falls.", animate=True)
                 combat_log.append(f"{target['name']} defeated")
 
         elif choice == "item":
@@ -138,27 +142,30 @@ def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: Combat
                 continue
 
             chosen = state.consumables[pick]
-            effect = chosen.effect
-            if effect.startswith("heal_"):
-                amount = int(effect.split("_")[1])
-                before = state.hp
-                state.hp = min(state.max_hp, state.hp + amount)
-                restored = state.hp - before
-                interface.log(f"You use {chosen.name}. Restored {restored} HP.")
+            effect_result = state.apply_consumable_effect(chosen)
+            if effect_result is not None:
+                interface.log(effect_result)
             else:
-                interface.log(f"You use {chosen.name}. No visible effect.")
+                # Narrative-only item used mid-fight: no LLM available here, so
+                # fall back to its description rather than a dead "no effect".
+                msg = f"You use {chosen.name}."
+                if chosen.description:
+                    msg += f" {chosen.description}"
+                interface.log(msg)
             state.consumables.remove(chosen)
             combat_log.append(f"used {chosen.name}")
 
         elif choice == "flee":
             flee_roll = random.randint(1, 10)
             if flee_roll >= 4:
-                interface.log("You disengage and fall back.")
+                interface.log("You disengage and fall back.", animate=True)
                 combat_log.append("player fled")
                 result = "fled"
                 break
             else:
-                interface.log("You try to break away but can't find an opening.")
+                interface.log("You try to break away but can't find an opening.", animate=True)
+
+        interface.on_player_action_complete()
 
         # enemy turns
         if result == "ongoing":
@@ -166,25 +173,29 @@ def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: Combat
                 if e["hp"] <= 0:
                     continue
                 roll = random.randint(1, e["damage_range"])
-                damage = max(0, roll - state.equipped_armor.armor_value)
+                armor_val = state.equipped_armor.armor_value + state.armor_buff
+                damage = max(0, roll - armor_val)
 
                 if damage > 0:
                     state.hp = max(0, state.hp - damage)
-                    interface.log(f"{e['name']} strikes you for {damage} damage. (rolled {roll} - {state.equipped_armor.armor_value} armor)")
+                    interface.log(f"{e['name']} strikes you for {damage} damage. (rolled {roll} - {armor_val} armor)")
                 else:
-                    interface.log(f"{e['name']}'s attack glances off your armor. (rolled {roll} - {state.equipped_armor.armor_value} armor)")
+                    interface.log(f"{e['name']}'s attack glances off your armor. (rolled {roll} - {armor_val} armor)")
 
                 if state.hp <= 0:
-                    interface.log("You collapse.")
+                    interface.log("You collapse.", animate=True)
                     combat_log.append("player defeated")
                     result = "defeat"
                     break
 
         # check victory
         if result == "ongoing" and all(e["hp"] <= 0 for e in enemies):
-            interface.log("The fight ends.")
+            interface.log("The fight ends.", animate=True)
             combat_log.append("all enemies defeated")
             result = "victory"
+
+        # one round elapsed; age any active buffs
+        state.tick_buffs()
 
     return {
         "result": result,

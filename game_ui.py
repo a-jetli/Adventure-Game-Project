@@ -14,7 +14,7 @@ from logs import (
     save_session, save_game, load_game, load_region, load_npc, wipe_save,
 )
 from ui import GameUI
-from game_logic import handle_local_command, call_llm, summarize_context
+from game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt, format_inventory_display, generate_recap
 
 
 load_dotenv()
@@ -45,35 +45,9 @@ def _debug_log(turn: int, player_input: str, narrative: str):
             f.write(f"OUTPUT: {narrative}\n")
 
 
-# ── LLM calls ─────────────────────────────────────────────────────────────────
-
-def load_system_prompt() -> str:
-    with open("system_prompt.md", "r") as f:
-        return f.read()
-
-
-
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
-
-def _format_inventory_display(state: EngineState) -> str:
-    def names(parts):
-        return ", ".join(parts) if parts else "none"
-
-    lines = [
-        "Inventory",
-        "Equipment:",
-        f"- Weapon: {state.equipped_weapon.name} (1-{state.equipped_weapon.damage_range} dmg)",
-        f"- Armor:  {state.equipped_armor.name} ({state.equipped_armor.armor_value} armor)",
-        "Bag:",
-        f"- Weapons: {names([w.name for w in state.weapons])}",
-        f"- Armor: {names([a.name for a in state.armor])}",
-        f"- Consumables: {names([c.name for c in state.consumables])}",
-        f"- Trinkets: {names([t.name for t in state.trinkets])}",
-    ]
-    return "\n".join(lines)
-
 
 def _known_npcs_for_ui(state: EngineState) -> list[str]:
     npcs = []
@@ -174,18 +148,28 @@ class GUICombatInterface(CombatInterface):
         self.ui.begin_combat_intro(f"COMBAT — {enemy_type}", flashes=1, interval=0.18)
         self.ui.wait_for_combat_intro()
 
-    def log(self, message: str):
-        self.ui.add_combat_text(message)
+    def log(self, message: str, animate: bool = False):
+        self.ui.add_combat_text(message, animate=animate)
+        if animate:
+            self.ui.wait_for_text_output()
+
+    def on_player_action_complete(self):
+        self.ui.wait_for_text_output()
+        time.sleep(0.4)
 
     def choose_action(self, state: EngineState, alive_enemies: list[dict]) -> str:
+        weapon_dmg = state.equipped_weapon.damage_range + state.damage_buff
+        armor_val = state.equipped_armor.armor_value + state.armor_buff
         status_lines = [
-            (f"You: {state.hp}/{state.max_hp} HP", (210, 210, 205)),
-            (f"Weapon: {state.equipped_weapon.name} ({state.equipped_weapon.damage_range} dmg)", (140, 180, 120)),
-            (f"Armor: {state.equipped_armor.name} ({state.equipped_armor.armor_value})", (100, 160, 180)),
+            (f"You: {state.hp}/{state.max_hp} HP", (220, 223, 229)),
+            (f"Weapon: {state.equipped_weapon.name} ({weapon_dmg} dmg)", (150, 208, 132)),
+            (f"Armor: {state.equipped_armor.name} ({armor_val})", (122, 198, 230)),
         ]
-        status_lines.append(("Enemies:", (205, 110, 110)))
+        if state.buffs:
+            status_lines.append((f"Effects: {state._buffs_string()}", (238, 208, 122)))
+        status_lines.append(("Enemies:", (235, 116, 110)))
         for e in alive_enemies:
-            status_lines.append((f"  {e['name']}: {e['hp']}/{e['max_hp']} | A {e['armor']}", (205, 110, 110)))
+            status_lines.append((f"  {e['name']}: {e['hp']}/{e['max_hp']} | A {e['armor']}", (235, 116, 110)))
 
         choice = self.ui.show_combat_hud(
             f"COMBAT — {self.enemy_type}",
@@ -202,11 +186,11 @@ class GUICombatInterface(CombatInterface):
     def choose_item(self, state: EngineState) -> int | None:
         usable = state.consumables
         item_lines = [
-            (f"You: {state.hp}/{state.max_hp} HP", (210, 210, 205)),
-            ("Consumables:", (140, 180, 120)),
+            (f"You: {state.hp}/{state.max_hp} HP", (220, 223, 229)),
+            ("Consumables:", (150, 208, 132)),
         ]
         for item in usable:
-            item_lines.append((f"  {item.name} [{_consumable_effect_label(item.effect)}]", (140, 180, 120)))
+            item_lines.append((f"  {item.name} [{_consumable_effect_label(item.effect)}]", (150, 208, 132)))
 
         item_options = [(item.name, f"item_{idx}") for idx, item in enumerate(usable)]
         item_options.append(("Cancel", "cancel"))
@@ -259,7 +243,11 @@ def game_thread(ui: GameUI):
             )
             ui.add_system(f"Welcome back, {state.player.name}. Turn {state.session_turn}.")
             ui.add_system(f"Location: {state.location} | HP: {state.hp}/{state.max_hp}")
-            ui.add_system(_format_inventory_display(state))
+            ui.add_system(format_inventory_display(state))
+            recap = generate_recap(client, state, hot_context, MODEL_SUMMARY, session_stats)
+            if recap:
+                ui.add_system("\nPreviously...")
+                ui.add_narrative(recap)
         else:
             ui.add_system("No save found. Starting new game.")
             state, hot_context = new_game(ui, client, system_prompt)
@@ -314,7 +302,7 @@ def game_thread(ui: GameUI):
             _known_npcs_for_ui(state),
         )
 
-        ui.add_narrative(response.narrative)
+        ui.add_narrative(response.narrative, area_intro=response.state_changes.location_is_new)
         _debug_log(state.session_turn, player_input, response.narrative)
 
         # async log writing
@@ -395,7 +383,15 @@ def new_game(ui: GameUI, client, system_prompt) -> tuple:
 
     seed_response = call_llm(
         client, system_prompt, state, [],
-        "Begin. Generate the opening scene. Do not reference the player's past — this is the very first moment. Seed one concrete story thread: a rumor, a visible landmark with implied history, a distant event the player can hear or see evidence of, or a clear sign that something happened here recently. Give the player something to pursue without telling them to pursue it.",
+        "Begin. Generate the opening scene following THE OPENING SCENE guidance: "
+        "four to six paragraphs that establish where the player physically stands, "
+        "the time of day, the weather, the sounds and smells, and the life around "
+        "them. Do not reference the player's past — this is the very first moment. "
+        "Ground them in a specific, named place and set location with location_is_new "
+        "true. Plant exactly one concrete hook they could choose to pursue — a rumor, "
+        "a visible landmark with implied history, a distant event they can see or hear, "
+        "or a clear sign something happened here recently — without telling them to "
+        "pursue it and without creating a quest. End on a detail, not a question.",
         MODEL_NARRATIVE, session_stats
     )
     state.apply_state_changes(seed_response.state_changes)
@@ -408,7 +404,7 @@ def new_game(ui: GameUI, client, system_prompt) -> tuple:
     threading.Thread(target=process_response, args=(seed_response, snapshot), daemon=True).start()
 
     ui.set_context(name, state.visited_locations, _all_items_for_ui(state), _known_npcs_for_ui(state))
-    ui.add_narrative(seed_response.narrative)
+    ui.add_narrative(seed_response.narrative, area_intro=True)
     hot_context.append(f"[Scene]: {seed_response.narrative}")
 
     return state, hot_context

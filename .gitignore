@@ -6,3 +6,7 @@ __pycache__/
 logs/
 .DS_Store
 theorycrafting.txt
+
+# personal working notes, not for the repo
+implementation_details.md
+changelog.md

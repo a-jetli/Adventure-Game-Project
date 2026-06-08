@@ -3,7 +3,7 @@ import json
 import threading
 from datetime import datetime
 from schema import LLMResponse
-from engine import EngineState, PlayerCharacter, WeaponData, ArmorData, ConsumableData, TrinketData
+from engine import EngineState, PlayerCharacter, WeaponData, ArmorData, ConsumableData, TrinketData, QuestData, ActiveBuff
 
 FILE_LOCK = threading.RLock()
 
@@ -150,6 +150,15 @@ def save_game(state: EngineState, hot_context: list[str]):
             {"name": t.name, "description": t.description}
             for t in state.trinkets
         ],
+        "quests": [
+            {"id": q.id, "title": q.title, "description": q.description,
+             "status": q.status, "stages": q.stages}
+            for q in state.quests
+        ],
+        "buffs": [
+            {"kind": b.kind, "amount": b.amount, "rounds_left": b.rounds_left}
+            for b in state.buffs
+        ],
         "equipped_weapon": {
             "name": state.equipped_weapon.name,
             "damage_range": state.equipped_weapon.damage_range,
@@ -201,6 +210,15 @@ def load_game() -> tuple[EngineState, list[str]] | None:
             TrinketData(name=t["name"], description=t.get("description", ""))
             for t in data.get("trinkets", [])
         ]
+        quests = [
+            QuestData(id=q["id"], title=q["title"], description=q["description"],
+                      status=q.get("status", "active"), stages=q.get("stages", []))
+            for q in data.get("quests", [])
+        ]
+        buffs = [
+            ActiveBuff(kind=b["kind"], amount=b["amount"], rounds_left=b["rounds_left"])
+            for b in data.get("buffs", [])
+        ]
 
         eq_w = data.get("equipped_weapon", {"name": "fists", "damage_range": 4, "description": ""})
         eq_a = data.get("equipped_armor", {"name": "none", "armor_value": 0, "description": ""})
@@ -217,6 +235,8 @@ def load_game() -> tuple[EngineState, list[str]] | None:
             trinkets=trinkets,
             equipped_weapon=WeaponData(name=eq_w["name"], damage_range=eq_w["damage_range"], description=eq_w.get("description", "")),
             equipped_armor=ArmorData(name=eq_a["name"], armor_value=eq_a["armor_value"], description=eq_a.get("description", "")),
+            quests=quests,
+            buffs=buffs,
             visited_locations=data["visited_locations"],
             npc_relationships=data["npc_relationships"],
             session_turn=data["session_turn"],

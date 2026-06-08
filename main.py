@@ -15,7 +15,7 @@ from logs import (
     load_region,
     load_npc,
 )
-from game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt
+from game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt, generate_recap
 
 load_dotenv()
 MODEL_NARRATIVE = "gpt-5.4-nano"
@@ -52,6 +52,9 @@ def main():
             print(f"Location: {state.location}")
             print(f"HP: {state.hp}/{state.max_hp}")
             print(f"Inventory: {state._inventory_string()}\n")
+            recap = generate_recap(client, state, hot_context, MODEL_SUMMARY)
+            if recap:
+                print(f"Previously...\n{recap}\n")
         else:
             state, hot_context = _new_game(client, system_prompt)
     else:
@@ -119,7 +122,15 @@ def _new_game(client: OpenAI, system_prompt: str) -> tuple[EngineState, list[str
         system_prompt,
         state,
         [],
-        "Begin. Generate the opening scene. Do not reference the player's past — this is the very first moment. Seed one concrete story thread: a rumor, a visible landmark with implied history, a distant event the player can hear or see evidence of, or a clear sign that something happened here recently. Give the player something to pursue without telling them to pursue it.",
+        "Begin. Generate the opening scene following THE OPENING SCENE guidance: "
+        "four to six paragraphs that establish where the player physically stands, "
+        "the time of day, the weather, the sounds and smells, and the life around "
+        "them. Do not reference the player's past — this is the very first moment. "
+        "Ground them in a specific, named place and set location with location_is_new "
+        "true. Plant exactly one concrete hook they could choose to pursue — a rumor, "
+        "a visible landmark with implied history, a distant event they can see or hear, "
+        "or a clear sign something happened here recently — without telling them to "
+        "pursue it and without creating a quest. End on a detail, not a question.",
         MODEL_NARRATIVE,
     )
     state.apply_state_changes(seed_response.state_changes)

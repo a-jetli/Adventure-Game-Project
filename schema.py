@@ -36,6 +36,19 @@ class InventoryUpdate(BaseModel):
     trinkets_remove: list[str] = Field(default_factory=list)
 
 
+class Quest(BaseModel):
+    id: str
+    title: str
+    description: str
+    status: Literal["active", "completed", "failed"] = "active"
+    stages: list[str] = Field(default_factory=list)
+
+
+class QuestUpdate(BaseModel):
+    id: str
+    status: Literal["active", "completed", "failed"]
+
+
 class EnemyDescriptor(BaseModel):
     enemy_type: str
     difficulty: Literal["trivial", "easy", "medium", "hard", "deadly"]
@@ -55,6 +68,9 @@ class StateChanges(BaseModel):
     combat_triggered: bool = False
     encounter: EnemyDescriptor | None = None
     action_type: Literal["none", "short", "medium", "long"] = "none"
+    hp_delta: int = 0
+    quest_added: Quest | None = None
+    quest_updated: QuestUpdate | None = None
 
 
 class LLMResponse(BaseModel):
