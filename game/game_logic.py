@@ -1,9 +1,9 @@
 import time
 import re
-from schema import LLMResponse
-from engine import EngineState
-from logs import load_region, load_npc
-from stats import SessionStats, CallRecord
+from .schema import LLMResponse
+from .engine import EngineState
+from .logs import load_region, load_npc
+from .stats import SessionStats, CallRecord
 
 def load_system_prompt() -> str:
     with open("system_prompt.md", "r") as f:
@@ -268,7 +268,7 @@ PLAYER INPUT:
 
 
 def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    from stats import (COST_PER_INPUT_TOKEN, COST_PER_OUTPUT_TOKEN,
+    from .stats import (COST_PER_INPUT_TOKEN, COST_PER_OUTPUT_TOKEN,
                        SUMMARY_INPUT_TOKEN, SUMMARY_OUTPUT_TOKEN)
     if "mini" in model.lower():
         return input_tokens * SUMMARY_INPUT_TOKEN + output_tokens * SUMMARY_OUTPUT_TOKEN
@@ -290,7 +290,7 @@ def summarize_context(client, hot_context: list[str], model="gpt-4o-mini", sessi
     )
     latency_ms = (time.time() - t_start) * 1000
     if session_stats is not None:
-        from stats import SUMMARY_INPUT_TOKEN, SUMMARY_OUTPUT_TOKEN
+        from .stats import SUMMARY_INPUT_TOKEN, SUMMARY_OUTPUT_TOKEN
         cost = response.usage.prompt_tokens * SUMMARY_INPUT_TOKEN + response.usage.completion_tokens * SUMMARY_OUTPUT_TOKEN
         record = CallRecord(
             turn=-1,
@@ -333,7 +333,7 @@ def generate_recap(client, state, hot_context: list[str], model="gpt-4o-mini", s
         )
         latency_ms = (time.time() - t_start) * 1000
         if session_stats is not None:
-            from stats import SUMMARY_INPUT_TOKEN, SUMMARY_OUTPUT_TOKEN
+            from .stats import SUMMARY_INPUT_TOKEN, SUMMARY_OUTPUT_TOKEN
             cost = response.usage.prompt_tokens * SUMMARY_INPUT_TOKEN + response.usage.completion_tokens * SUMMARY_OUTPUT_TOKEN
             session_stats.record(CallRecord(
                 turn=-1,

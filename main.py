@@ -2,10 +2,10 @@ import os
 import threading
 from dotenv import load_dotenv
 from openai import OpenAI
-from schema import LLMResponse
-from engine import EngineState, PlayerCharacter
-from combat import run_combat
-from logs import (
+from game.schema import LLMResponse
+from game.engine import EngineState, PlayerCharacter
+from game.combat import run_combat
+from game.logs import (
     init_logs,
     write_world_seed,
     process_response,
@@ -15,7 +15,7 @@ from logs import (
     load_region,
     load_npc,
 )
-from game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt, generate_recap
+from game.game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt, generate_recap
 
 load_dotenv()
 MODEL_NARRATIVE = "gpt-5.4-nano"

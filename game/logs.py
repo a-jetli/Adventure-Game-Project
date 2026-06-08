@@ -2,8 +2,8 @@ import os
 import json
 import threading
 from datetime import datetime
-from schema import LLMResponse
-from engine import EngineState, PlayerCharacter, WeaponData, ArmorData, ConsumableData, TrinketData, QuestData, ActiveBuff
+from .schema import LLMResponse
+from .engine import EngineState, PlayerCharacter, WeaponData, ArmorData, ConsumableData, TrinketData, QuestData, ActiveBuff
 
 FILE_LOCK = threading.RLock()
 

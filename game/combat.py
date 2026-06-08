@@ -1,6 +1,6 @@
 import random
-from engine import EngineState
-from schema import EnemyDescriptor
+from .engine import EngineState
+from .schema import EnemyDescriptor
 
 class CombatInterface:
     def show_intro(self, enemy_type: str):

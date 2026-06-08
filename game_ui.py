@@ -6,15 +6,15 @@ import time
 import pygame
 from dotenv import load_dotenv
 from openai import OpenAI
-from schema import LLMResponse
-from engine import EngineState, PlayerCharacter
-from stats import SessionStats, CallRecord
-from logs import (
+from game.schema import LLMResponse
+from game.engine import EngineState, PlayerCharacter
+from game.stats import SessionStats, CallRecord
+from game.logs import (
     init_logs, write_world_seed, process_response,
     save_session, save_game, load_game, load_region, load_npc, wipe_save,
 )
-from ui import GameUI
-from game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt, format_inventory_display, generate_recap
+from game.ui import GameUI
+from game.game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt, format_inventory_display, generate_recap
 
 
 load_dotenv()
@@ -137,7 +137,7 @@ def opening_menu(ui: GameUI, has_save: bool) -> str:
 
 # ── combat ────────────────────────────────────────────────────────────────────
 
-from combat import CombatInterface, run_combat
+from game.combat import CombatInterface, run_combat
 
 class GUICombatInterface(CombatInterface):
     def __init__(self, ui: GameUI, enemy_type: str):
@@ -338,7 +338,7 @@ def game_thread(ui: GameUI):
 
 def new_game(ui: GameUI, client, system_prompt) -> tuple:
     global session_stats
-    from stats import SessionStats
+    from game.stats import SessionStats
     session_stats = SessionStats()
     _debug_log_clear()
 

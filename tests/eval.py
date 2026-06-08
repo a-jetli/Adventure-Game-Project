@@ -13,10 +13,10 @@ import hashlib
 from dotenv import load_dotenv
 from datetime import datetime
 from openai import OpenAI
-from engine import EngineState, PlayerCharacter, WeaponData, ArmorData
-from schema import LLMResponse, StateChanges
-from game_logic import load_system_prompt, call_llm
-from stats import SessionStats, CallRecord
+from game.engine import EngineState, PlayerCharacter, WeaponData, ArmorData
+from game.schema import LLMResponse, StateChanges
+from game.game_logic import load_system_prompt, call_llm
+from game.stats import SessionStats, CallRecord
 
 load_dotenv()
 
