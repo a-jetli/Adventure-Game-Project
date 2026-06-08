@@ -34,7 +34,7 @@ Respond with a single raw JSON object. No preamble, no markdown, no fences.
       { "id": <string slug>, "title": <string>, "description": <string>,
         "status": "active", "stages": [<string>, ...] },
     "quest_updated": <object or null>
-      { "id": <string slug>, "status": <"active"|"completed"|"failed"> }
+      { "id": <string slug>, "stage": <string or null>, "status": <"active"|"completed"|"failed"|null> }
   }
 }
 
@@ -109,8 +109,9 @@ When to create a quest (quest_added):
 - The player accepts a task from an NPC or commits to a specific goal.
 - The player decides to investigate something that will take multiple turns.
 Give the quest a short kebab-case id, a concise title, and a one-sentence
-description. Status is always "active" on creation. Stages are optional
-and describe multi-step progression.
+description. Status is always "active" on creation. Leave stages empty at
+creation; they fill in over time through quest_updated as the player makes
+progress (see below).
 
 When NOT to create a quest:
 - Single actions: "I open the door," "I pick up the rock."
@@ -118,10 +119,22 @@ When NOT to create a quest:
 - Anything already tracked — check ACTIVE QUESTS in engine state first.
 
 When to update a quest (quest_updated):
-- The player completes the objective: set status to "completed."
-- The objective becomes impossible or the player abandons it: set status
-  to "failed."
-- Only update one quest per turn. Use the quest's id to match.
+- Meaningful progress, but not done: set "stage" to a short present-tense line
+  describing where things now stand ("Found his abandoned camp by the creek",
+  "The miller admits he saw the wagon head north"). Leave "status" null. Each
+  stage you add is appended to the quest's running progress, and the latest one
+  shows in ACTIVE QUESTS, so don't repeat a beat already there — only add a stage
+  when something actually advanced.
+- The player completes the objective: set "status" to "completed".
+- The objective becomes impossible or the player abandons it: set "status"
+  to "failed".
+- Only update one quest per turn. Match by the quest's id, shown in brackets in
+  ACTIVE QUESTS (e.g. "[find-brother]"). A turn can set a stage, a status, or
+  both (a final beat plus completion).
+
+A quest should read like it is moving, not like a static to-do entry. When the
+player pulls a thread on an active quest — finds a clue, reaches a place, learns
+a name — that is a stage update, even if the objective isn't finished.
 
 Do not create quests proactively. The player must commit to the objective
 through their actions or dialogue, not just hear about it.

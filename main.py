@@ -1,7 +1,6 @@
-import os
 import threading
-from dotenv import load_dotenv
 from openai import OpenAI
+from game.config import make_client, MODEL_NARRATIVE, MODEL_SUMMARY
 from game.schema import LLMResponse
 from game.engine import EngineState, PlayerCharacter
 from game.combat import run_combat
@@ -16,10 +15,6 @@ from game.logs import (
     load_npc,
 )
 from game.game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt, generate_recap
-
-load_dotenv()
-MODEL_NARRATIVE = "gpt-5.4-nano"
-MODEL_SUMMARY = "gpt-4o-mini"
 
 def process_response_async(response: LLMResponse, state_snapshot: dict):
     thread = threading.Thread(target=process_response, args=(response, state_snapshot))
@@ -40,7 +35,7 @@ def bootstrap_player() -> PlayerCharacter:
 
 def main():
     init_logs()
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = make_client()
     system_prompt = load_system_prompt()
 
     existing_save = load_game()

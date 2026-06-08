@@ -4,6 +4,8 @@ from .schema import LLMResponse
 from .engine import EngineState
 from .logs import load_region, load_npc
 from .stats import SessionStats, CallRecord
+from .config import MODEL_NARRATIVE, MODEL_SUMMARY, reasoning_kwargs
+
 
 def load_system_prompt() -> str:
     with open("system_prompt.md", "r") as f:
@@ -139,6 +141,8 @@ def format_quest_log(state: EngineState) -> str:
         lines.append("Active:")
         for q in active:
             lines.append(f"  [{q.title}] {q.description}")
+            if q.stages:
+                lines.append(f"      progress: {q.stages[-1]}")
     if completed:
         lines.append("Completed:")
         for q in completed:
@@ -150,7 +154,7 @@ def format_quest_log(state: EngineState) -> str:
     return "\n".join(lines)
 
 
-def call_llm(client, system_prompt, state, hot_context, player_input, model="gpt-5.4-nano", session_stats=None) -> LLMResponse:
+def call_llm(client, system_prompt, state, hot_context, player_input, model=MODEL_NARRATIVE, session_stats=None) -> LLMResponse:
     context_block = "\n".join(hot_context) if hot_context else "No prior context."
     retrieved = []
     if state.location and state.location != "unknown":
@@ -186,11 +190,11 @@ PLAYER INPUT:
         response = client.chat.completions.create(
             model=model,
             max_completion_tokens=4000,
-            reasoning_effort="low",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": user_message}
-            ]
+            ],
+            **reasoning_kwargs(),
         )
         input_tokens  = response.usage.prompt_tokens
         output_tokens = response.usage.completion_tokens
@@ -210,13 +214,13 @@ PLAYER INPUT:
             retry_resp = client.chat.completions.create(
                 model=model,
                 max_completion_tokens=4000,
-                reasoning_effort="low",
                 messages=[
                     {"role": "system",    "content": system_prompt},
                     {"role": "user",      "content": user_message},
                     {"role": "assistant", "content": raw},
                     {"role": "user",      "content": "Your response was not valid JSON matching the required schema. Return only the raw JSON object, no other text."}
-                ]
+                ],
+                **reasoning_kwargs(),
             )
             input_tokens  += retry_resp.usage.prompt_tokens
             output_tokens += retry_resp.usage.completion_tokens
@@ -275,7 +279,7 @@ def _compute_cost(model: str, input_tokens: int, output_tokens: int) -> float:
     return input_tokens * COST_PER_INPUT_TOKEN + output_tokens * COST_PER_OUTPUT_TOKEN
 
 
-def summarize_context(client, hot_context: list[str], model="gpt-4o-mini", session_stats=None) -> str:
+def summarize_context(client, hot_context: list[str], model=MODEL_SUMMARY, session_stats=None) -> str:
     oldest = hot_context[:3]
     block = "\n".join(oldest)
     t_start = time.time()
@@ -308,7 +312,7 @@ def summarize_context(client, hot_context: list[str], model="gpt-4o-mini", sessi
     return f"[Summary of earlier events]: {response.choices[0].message.content.strip()}"
 
 
-def generate_recap(client, state, hot_context: list[str], model="gpt-4o-mini", session_stats=None) -> str | None:
+def generate_recap(client, state, hot_context: list[str], model=MODEL_SUMMARY, session_stats=None) -> str | None:
     """A short 'previously...' recap shown when a save is resumed. Returns None
     on failure so a recap is never allowed to block loading the game."""
     recent = "\n".join(hot_context[-6:]) if hot_context else "No prior events recorded."

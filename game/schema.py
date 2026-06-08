@@ -46,7 +46,8 @@ class Quest(BaseModel):
 
 class QuestUpdate(BaseModel):
     id: str
-    status: Literal["active", "completed", "failed"]
+    status: Literal["active", "completed", "failed"] | None = None
+    stage: str | None = None
 
 
 class EnemyDescriptor(BaseModel):

@@ -4,8 +4,7 @@ import random
 import threading
 import time
 import pygame
-from dotenv import load_dotenv
-from openai import OpenAI
+from game.config import make_client, MODEL_NARRATIVE, MODEL_SUMMARY
 from game.schema import LLMResponse
 from game.engine import EngineState, PlayerCharacter
 from game.stats import SessionStats, CallRecord
@@ -17,12 +16,9 @@ from game.ui import GameUI
 from game.game_logic import handle_local_command, call_llm, summarize_context, load_system_prompt, format_inventory_display, generate_recap
 
 
-load_dotenv()
 session_stats = SessionStats()
 
 
-MODEL_NARRATIVE = "gpt-5.4-nano"
-MODEL_SUMMARY = "gpt-4o-mini"
 DEBUG_LOG = "logs/debug_narrative.txt"
 DEBUG_LOCK = threading.RLock()
 
@@ -162,11 +158,9 @@ class GUICombatInterface(CombatInterface):
         armor_val = state.equipped_armor.armor_value + state.armor_buff
         status_lines = [
             (f"You: {state.hp}/{state.max_hp} HP", (220, 223, 229)),
-            (f"Weapon: {state.equipped_weapon.name} ({weapon_dmg} dmg)", (150, 208, 132)),
-            (f"Armor: {state.equipped_armor.name} ({armor_val})", (122, 198, 230)),
+            (f"Weapon: {state.equipped_weapon.name} ({weapon_dmg} dmg){state.buff_label('damage')}", (150, 208, 132)),
+            (f"Armor: {state.equipped_armor.name} ({armor_val}){state.buff_label('armor')}", (122, 198, 230)),
         ]
-        if state.buffs:
-            status_lines.append((f"Effects: {state._buffs_string()}", (238, 208, 122)))
         status_lines.append(("Enemies:", (235, 116, 110)))
         for e in alive_enemies:
             status_lines.append((f"  {e['name']}: {e['hp']}/{e['max_hp']} | A {e['armor']}", (235, 116, 110)))
@@ -222,7 +216,7 @@ def run_combat_ui(ui: GameUI, state: EngineState, encounter) -> dict:
 
 def game_thread(ui: GameUI):
     init_logs()
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = make_client()
     system_prompt = load_system_prompt()
 
     existing_save = load_game()

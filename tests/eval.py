@@ -10,15 +10,12 @@ import os
 import sys
 import json
 import hashlib
-from dotenv import load_dotenv
 from datetime import datetime
-from openai import OpenAI
-from game.engine import EngineState, PlayerCharacter, WeaponData, ArmorData
+from game.config import make_client
+from game.engine import EngineState, PlayerCharacter, WeaponData, ArmorData, QuestData
 from game.schema import LLMResponse, StateChanges
 from game.game_logic import load_system_prompt, call_llm
 from game.stats import SessionStats, CallRecord
-
-load_dotenv()
 
 # ── minimal engine state for eval calls ──────────────────────────────────────
 
@@ -51,6 +48,12 @@ def _hot_context_for(turns: list[str]) -> list[str]:
         f"[Turn {i+1}] Player: {t} | The world responded."
         for i, t in enumerate(turns)
     ]
+
+
+def _state_with_active_quest(qid: str, title: str, description: str) -> EngineState:
+    state = _make_state(has_npc="the innkeeper")
+    state.quests.append(QuestData(id=qid, title=title, description=description, status="active"))
+    return state
 
 
 # ── test case definition ──────────────────────────────────────────────────────
@@ -305,6 +308,33 @@ def _build_test_cases() -> list[TestCase]:
             ],
         ),
 
+        # ── quest progression: a tracked quest advances or completes ──────────
+        TestCase(
+            name="quest/progress_updates_existing",
+            player_input="I find the innkeeper's missing brother alive in the woods and walk him back to the inn.",
+            state=_state_with_active_quest(
+                "find-brother",
+                "Find the missing brother",
+                "The innkeeper's brother went into the northern woods and never came back.",
+            ),
+            hot_context=[
+                "[Turn 5] Player: I followed the trail north | Bootprints led you deep into the pines.",
+            ],
+            checks=[
+                ("quest_updated is populated",
+                 lambda r: r.state_changes.quest_updated is not None),
+                ("update targets the existing quest id",
+                 lambda r: r.state_changes.quest_updated is not None
+                           and r.state_changes.quest_updated.id == "find-brother"),
+                ("update carries progress — a stage or a status",
+                 lambda r: r.state_changes.quest_updated is not None
+                           and (bool(r.state_changes.quest_updated.stage)
+                                or r.state_changes.quest_updated.status is not None)),
+                ("no duplicate quest created for the same thread",
+                 lambda r: r.state_changes.quest_added is None),
+            ],
+        ),
+
         # ── world authoring: pushback on impossible grabs ─────────────────────
         TestCase(
             name="agency/no_freebie_legendary_weapon",
@@ -341,7 +371,7 @@ def _build_test_cases() -> list[TestCase]:
 # ── runner ────────────────────────────────────────────────────────────────────
 
 def run_eval():
-    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    client = make_client()
     system_prompt = load_system_prompt()
 
     import game_ui

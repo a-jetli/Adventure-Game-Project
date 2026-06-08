@@ -133,9 +133,13 @@ class EngineState:
                 ))
 
         if changes.quest_updated:
+            upd = changes.quest_updated
             for q in self.quests:
-                if q.id == changes.quest_updated.id:
-                    q.status = changes.quest_updated.status
+                if q.id == upd.id:
+                    if upd.stage:
+                        q.stages.append(upd.stage)
+                    if upd.status is not None:
+                        q.status = upd.status
                     break
 
         self.advance_time(changes.action_type)
@@ -159,6 +163,17 @@ class EngineState:
     @property
     def armor_buff(self) -> int:
         return sum(b.amount for b in self.buffs if b.kind == "armor")
+
+    def buff_label(self, kind: str) -> str:
+        """Compact inline tag for a stat's active buffs, e.g. ' [+3, 2 rounds]'.
+        Empty string when no buff of that kind is active."""
+        relevant = [b for b in self.buffs if b.kind == kind]
+        if not relevant:
+            return ""
+        total = sum(b.amount for b in relevant)
+        rounds = max(b.rounds_left for b in relevant)
+        unit = "round" if rounds == 1 else "rounds"
+        return f" [+{total}, {rounds} {unit}]"
 
     def apply_consumable_effect(self, item) -> str | None:
         """Resolve a consumable's mechanical effect, mutating state. Returns a
@@ -234,7 +249,13 @@ class EngineState:
         active = [q for q in self.quests if q.status == "active"]
         if not active:
             return "none"
-        return " | ".join(f"{q.title}: {q.description}" for q in active)
+        parts = []
+        for q in active:
+            s = f"[{q.id}] {q.title}: {q.description}"
+            if q.stages:
+                s += f" (progress: {q.stages[-1]})"
+            parts.append(s)
+        return " | ".join(parts)
 
     def to_prompt_string(self) -> str:
         time_label = self._time_label()

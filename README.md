@@ -15,7 +15,7 @@ I wrote this as a simple text based RPG in Python. It uses an OpenAI model to ge
 ```bash 
 pip install pygame pydantic python-dotenv openai
 ```
-3. Add your API key to a `.env` file in the project root
+3. Copy `.env.example` to `.env` and add your API key (you can set your models and provider there too, see Notes)
 4. Run the following command from the project root (May be slightly different depending on platforms and Python version):
 
 ```bash
@@ -57,5 +57,6 @@ The master system prompt in `system_prompt.md` gives strict restrictions on what
 
 ## Notes
 
-The default models are gpt-5.4-nano for narrative and gpt-4o-mini for summarization. 
-However, you can swap the `MODEL_NARRATIVE` and `MODEL_SUMMARY` fields in `game_ui.py` to use any OpenAI compatible model. 
+All the model and provider settings live in `.env` (copy `.env.example` to start), so you don't have to touch the source. The defaults are gpt-5.4-nano for narrative and gpt-4o-mini for summarization, set with `MODEL_NARRATIVE` and `MODEL_SUMMARY`.
+
+To use a provider other than OpenAI, put that provider's key in `LLM_API_KEY` and point `LLM_BASE_URL` at any OpenAI-compatible endpoint. Google Gemini, OpenRouter, Anthropic's compatibility endpoint, and local servers like Ollama all work this way (the example URLs are in `.env.example`). For non-OpenAI models, set `LLM_REASONING_EFFORT` to empty so the OpenAI-only reasoning parameter isn't sent. Two caveats: everything talks to the OpenAI chat-completions API shape, so a provider just needs an OpenAI-compatible endpoint (the native Anthropic or Gemini SDKs aren't used); and the cost figures in the session summary are calibrated to the default OpenAI models, so with others the token counts and latency stay accurate but the dollar amounts are rough. 
