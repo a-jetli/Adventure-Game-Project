@@ -4,6 +4,15 @@ from dataclasses import dataclass, field
 # How many combat rounds a consumable buff lasts when applied.
 DEFAULT_BUFF_ROUNDS = 3
 
+# Reverse directions, used to record the return edge in the location graph.
+OPPOSITE_DIRECTION = {
+    "north": "south", "south": "north", "east": "west", "west": "east",
+    "northeast": "southwest", "southwest": "northeast",
+    "northwest": "southeast", "southeast": "northwest",
+    "up": "down", "down": "up", "in": "out", "out": "in",
+    "inside": "outside", "outside": "inside", "left": "right", "right": "left",
+}
+
 
 @dataclass
 class ActiveBuff:
@@ -49,6 +58,32 @@ class QuestData:
 
 
 @dataclass
+class NPCRecord:
+    """A durable, structured record of a single NPC. The id is the stable
+    identity (a slug); everything else can change over time. description and
+    voice anchor consistency; facts holds promises/knowledge; location is the
+    engine's last knowledge of where they are (or said they'd be)."""
+    id: str
+    name: str
+    role: str = ""
+    location: str | None = None
+    disposition: int = 0
+    description: str = ""
+    voice: str = ""
+    facts: list[str] = field(default_factory=list)
+    last_seen_turn: int = 0
+
+
+@dataclass
+class WorldFact:
+    """A durable consequence of play. location scopes it to a place; None means
+    it's a world-level fact surfaced everywhere."""
+    text: str
+    location: str | None = None
+    turn: int = 0
+
+
+@dataclass
 class PlayerCharacter:
     name: str
     background: str
@@ -71,9 +106,17 @@ class EngineState:
     quests: list[QuestData] = field(default_factory=list)
     buffs: list[ActiveBuff] = field(default_factory=list)
     visited_locations: list[str] = field(default_factory=list)
-    npc_relationships: dict[str, int] = field(default_factory=dict)
+    npcs: dict[str, NPCRecord] = field(default_factory=dict)
+    world_facts: list[WorldFact] = field(default_factory=list)
+    location_types: dict[str, str] = field(default_factory=dict)
+    location_graph: dict[str, dict[str, str]] = field(default_factory=dict)
+    location_descriptions: dict[str, str] = field(default_factory=dict)  # place -> short gist
+    synopsis: str = ""  # evolving "story so far" — durable campaign memory (LLM working memory)
+    journal: list[dict] = field(default_factory=list)  # player-facing diary chapters: {turn,title,text}
+    last_chronicle_turn: int = 0  # turn the last journal chapter was triggered at
+    last_world_tick_turn: int = 0  # turn the last offscreen world tick was triggered at
     session_turn: int = 0
-    active_npc: str | None = None
+    active_npc: str | None = None  # id of the NPC currently in focus
     npc_idle_turns: int = 0
 
     def advance_time(self, action_type: str):
@@ -87,11 +130,28 @@ class EngineState:
 
     def apply_state_changes(self, changes):
         if changes.location:
+            prev_location = self.location
             self.location = changes.location
             self.active_npc = None
             self.npc_idle_turns = 0
             if changes.location_is_new:
                 self.visited_locations.append(changes.location)
+            if changes.location_type:
+                self.location_types[changes.location] = changes.location_type
+            # Record the path travelled so geography stays consistent on return.
+            if (changes.from_direction and prev_location
+                    and prev_location not in ("", "unknown")
+                    and prev_location != changes.location):
+                d = changes.from_direction.strip().lower()
+                self.location_graph.setdefault(prev_location, {})[d] = changes.location
+                opp = OPPOSITE_DIRECTION.get(d)
+                if opp:
+                    self.location_graph.setdefault(changes.location, {})[opp] = prev_location
+
+        # A short gist of the current place — set on arrival, updatable later if
+        # the place materially changes. Powers the location hover tooltip.
+        if changes.location_summary and self.location and self.location != "unknown":
+            self.location_descriptions[self.location] = changes.location_summary.strip()
 
         # inventory updates
         inv = changes.inventory
@@ -118,8 +178,34 @@ class EngineState:
             self.trinkets.append(TrinketData(name=t.name, description=t.description))
         self.trinkets = [t for t in self.trinkets if t.name not in inv.trinkets_remove]
 
-        for npc, delta in changes.relationship_delta.items():
-            self.npc_relationships[npc] = self.npc_relationships.get(npc, 0) + delta
+        # Add or update each NPC. The model refers to an NPC by a fixed id; we look
+        # that id up (creating the record if it's new), fill in any fields it sent,
+        # and add any new fact to keep. We stamp last_seen_turn on every NPC named
+        # this turn.
+        for upd in changes.npcs:
+            rec = self.npcs.get(upd.id)
+            if rec is None:
+                rec = NPCRecord(id=upd.id, name=upd.name or upd.id)
+                self.npcs[upd.id] = rec
+            if upd.name:
+                rec.name = upd.name
+            if upd.role:
+                rec.role = upd.role
+            if upd.location is not None:
+                rec.location = upd.location
+            if upd.description:
+                rec.description = upd.description
+            if upd.voice:
+                rec.voice = upd.voice
+            if upd.disposition_delta:
+                rec.disposition += upd.disposition_delta
+            if upd.note and upd.note not in rec.facts:
+                rec.facts.append(upd.note)
+            rec.last_seen_turn = self.session_turn
+
+        for wf in changes.world_facts_add:
+            if not any(f.text == wf.text and f.location == wf.location for f in self.world_facts):
+                self.world_facts.append(WorldFact(text=wf.text, location=wf.location, turn=self.session_turn))
 
         if changes.hp_delta:
             self.hp = max(0, min(self.max_hp, self.hp + changes.hp_delta))
@@ -145,8 +231,9 @@ class EngineState:
         self.advance_time(changes.action_type)
         self.session_turn += 1
 
-        if changes.npc_encountered:
-            self.active_npc = changes.npc_encountered
+        present = [u.id for u in changes.npcs if u.present]
+        if present:
+            self.active_npc = present[-1]
             self.npc_idle_turns = 0
         elif self.active_npc:
             self.npc_idle_turns += 1
@@ -240,10 +327,30 @@ class EngineState:
             parts.append(f"Trinkets: {', '.join(t.name for t in self.trinkets)}")
         return " | ".join(parts) if parts else "nothing"
 
-    def _relationships_string(self) -> str:
-        if not self.npc_relationships:
-            return "none"
-        return ", ".join(f"{npc}: {rel}" for npc, rel in self.npc_relationships.items())
+    def npcs_at(self, location: str) -> list[NPCRecord]:
+        """NPCs the engine believes are at (or headed to) a location."""
+        return [r for r in self.npcs.values() if r.location and r.location == location]
+
+    def relevant_world_facts(self, location: str, include_all_below: int = 30,
+                             scoped_cap: int = 12) -> list[WorldFact]:
+        """World facts to surface as ground truth, newest first. While the ledger
+        is small (≤ include_all_below), return ALL of it — a fact tied to a place
+        you've left is still true and the model must not contradict it. Only once
+        the ledger grows large do we fall back to scoping (this location + global),
+        capped at scoped_cap so the prompt never floods."""
+        if len(self.world_facts) <= include_all_below:
+            return list(reversed(self.world_facts))
+        relevant = [f for f in self.world_facts if f.location is None or f.location == location]
+        return list(reversed(relevant))[:scoped_cap]
+
+    def connections_from(self, location: str) -> dict[str, str]:
+        """Known directional links out of a location ({direction: place})."""
+        return self.location_graph.get(location, {})
+
+    def _active_npc_name(self) -> str:
+        if self.active_npc and self.active_npc in self.npcs:
+            return self.npcs[self.active_npc].name
+        return "none"
 
     def _quests_string(self) -> str:
         active = [q for q in self.quests if q.status == "active"]
@@ -261,15 +368,14 @@ class EngineState:
         time_label = self._time_label()
         return f"""PLAYER: {self.player.name} | {self.player.background}
 LOCATION: {self.location}
-ACTIVE NPC: {self.active_npc or "none"}
-NPC RELATIONSHIPS: {self._relationships_string()}
+ACTIVE NPC: {self._active_npc_name()}
 TIME: {time_label}
 HP: {self.hp}/{self.max_hp}
 EQUIPPED: {self.equipped_weapon.name} (1-{self.equipped_weapon.damage_range} dmg) | {self.equipped_armor.name} ({self.equipped_armor.armor_value} armor)
 INVENTORY: {self._inventory_string()}
 ACTIVE EFFECTS: {self._buffs_string()}
 ACTIVE QUESTS: {self._quests_string()}
-TONE: {self.player.tone}
+PLAYER'S CHOSEN TONE: {self.player.tone}
 TURN: {self.session_turn}"""
 
 

@@ -2,6 +2,37 @@ import random
 from .engine import EngineState
 from .schema import EnemyDescriptor
 
+
+# ── combat prose: vary the lines and scale them to how hard a blow landed ──────
+# Math is unchanged; these only pick how a hit is described.
+
+def _hit_tier(damage: int, target_max_hp: int) -> str:
+    frac = damage / max(1, target_max_hp)
+    if frac < 0.12:
+        return "glancing"
+    if frac < 0.30:
+        return "solid"
+    return "brutal"
+
+
+_PLAYER_HIT = {
+    "glancing": ["You nick {name}", "You catch {name} with the edge", "You score a shallow cut across {name}"],
+    "solid": ["You land a solid blow on {name}", "Your strike sinks into {name}", "You open {name} up"],
+    "brutal": ["You hammer {name} with everything you have", "Your blade tears deep into {name}", "You crack {name} hard enough to stagger them"],
+}
+_ENEMY_HIT = {
+    "glancing": ["{name} grazes you", "{name} clips you", "{name}'s blow skids across your guard"],
+    "solid": ["{name} catches you square", "{name} drives a blow home", "{name} lands a hard hit"],
+    "brutal": ["{name} smashes into you", "{name} rocks you to the heels", "{name} hits you like a falling beam"],
+}
+_PLAYER_MISS = ["Your swing glances off {name}'s armor.", "{name} turns your blade aside.", "Your blow skids off {name} without biting."]
+_ENEMY_MISS = ["{name}'s blow rings off your armor.", "You take {name}'s hit on your guard.", "{name} strikes, but the armor holds."]
+_KILL = ["{name} drops and stays down.", "{name} folds and doesn't rise.", "{name} goes down hard."]
+
+
+def _line(pool, name: str) -> str:
+    return random.choice(pool).format(name=name)
+
 class CombatInterface:
     def show_intro(self, enemy_type: str):
         pass
@@ -24,74 +55,7 @@ class CombatInterface:
         pass
 
 
-class CLICombatInterface(CombatInterface):
-    def show_intro(self, enemy_type: str):
-        print(f"\n{'='*40}")
-        print(f"  COMBAT — {enemy_type}")
-        print(f"{'='*40}")
-
-    def log(self, message: str, animate: bool = False):
-        print(f"  {message}")
-
-    def choose_action(self, state: EngineState, alive_enemies: list[dict]) -> str:
-        print(f"\n  {state.player.name}: {state.hp}/{state.max_hp} HP | Armor: {state.equipped_armor.armor_value}")
-        print(f"  Weapon: {state.equipped_weapon.name} (1-{state.equipped_weapon.damage_range})")
-        print()
-        for e in alive_enemies:
-            print(f"  {e['name']}: {e['hp']}/{e['max_hp']} HP | Armor: {e['armor']}")
-        print(f"\n{'─'*40}")
-        print("  1. Attack")
-        print("  2. Use item")
-        print("  3. Flee")
-        print(f"{'─'*40}")
-
-        while True:
-            choice = input("  > ").strip()
-            if choice == "1":
-                return "attack"
-            elif choice == "2":
-                return "item"
-            elif choice == "3":
-                return "flee"
-            else:
-                print("  Enter 1, 2, or 3.")
-
-    def choose_target(self, alive_enemies: list[dict]) -> dict:
-        if len(alive_enemies) == 1:
-            return alive_enemies[0]
-        print()
-        for i, e in enumerate(alive_enemies):
-            print(f"  {i+1}. {e['name']} ({e['hp']}/{e['max_hp']} HP)")
-        while True:
-            pick = input("  Target: ").strip()
-            try:
-                idx = int(pick) - 1
-                if 0 <= idx < len(alive_enemies):
-                    return alive_enemies[idx]
-            except (ValueError, IndexError):
-                pass
-            print(f"  Invalid selection. Enter the number of a target.")
-
-    def choose_item(self, state: EngineState) -> int | None:
-        usable = state.consumables
-        print()
-        for i, item in enumerate(usable):
-            print(f"  {i+1}. {item.name} — {item.description}")
-        pick = input("  Use: ").strip()
-        try:
-            idx = int(pick) - 1
-            if 0 <= idx < len(usable):
-                return idx
-        except (ValueError, IndexError):
-            pass
-        print("\n  Invalid choice.")
-        return None
-
-
-def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: CombatInterface = None) -> dict:
-    if interface is None:
-        interface = CLICombatInterface()
-
+def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: CombatInterface) -> dict:
     enemies = []
     for i in range(encounter.count):
         enemies.append({
@@ -124,12 +88,13 @@ def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: Combat
             target["hp"] = max(0, target["hp"] - damage)
 
             if damage > 0:
-                interface.log(f"You strike {target['name']} for {damage} damage. (rolled {roll} - {target['armor']} armor)")
+                lead = _line(_PLAYER_HIT[_hit_tier(damage, target["max_hp"])], target["name"])
+                interface.log(f"{lead} for {damage} damage. (rolled {roll} - {target['armor']} armor)")
             else:
-                interface.log(f"Your attack glances off {target['name']}'s armor. (rolled {roll} - {target['armor']} armor)")
+                interface.log(f"{_line(_PLAYER_MISS, target['name'])} (rolled {roll} - {target['armor']} armor)")
 
             if target["hp"] <= 0:
-                interface.log(f"{target['name']} falls.", animate=True)
+                interface.log(_line(_KILL, target["name"]), animate=True)
                 combat_log.append(f"{target['name']} defeated")
 
         elif choice == "item":
@@ -158,12 +123,20 @@ def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: Combat
         elif choice == "flee":
             flee_roll = random.randint(1, 10)
             if flee_roll >= 4:
-                interface.log("You disengage and fall back.", animate=True)
+                interface.log(_line([
+                    "You break off and put distance between you.",
+                    "You disengage and fall back before they can close.",
+                    "You turn and go, and they let you.",
+                ], ""), animate=True)
                 combat_log.append("player fled")
                 result = "fled"
                 break
             else:
-                interface.log("You try to break away but can't find an opening.", animate=True)
+                interface.log(_line([
+                    "You try to break away, but there's no opening yet.",
+                    "You move to run and a blade cuts you off.",
+                    "They press in before you can turn — no way clear.",
+                ], ""), animate=True)
 
         interface.on_player_action_complete()
 
@@ -178,19 +151,24 @@ def run_combat(state: EngineState, encounter: EnemyDescriptor, interface: Combat
 
                 if damage > 0:
                     state.hp = max(0, state.hp - damage)
-                    interface.log(f"{e['name']} strikes you for {damage} damage. (rolled {roll} - {armor_val} armor)")
+                    lead = _line(_ENEMY_HIT[_hit_tier(damage, state.max_hp)], e["name"])
+                    interface.log(f"{lead} for {damage} damage. (rolled {roll} - {armor_val} armor)")
                 else:
-                    interface.log(f"{e['name']}'s attack glances off your armor. (rolled {roll} - {armor_val} armor)")
+                    interface.log(f"{_line(_ENEMY_MISS, e['name'])} (rolled {roll} - {armor_val} armor)")
 
                 if state.hp <= 0:
-                    interface.log("You collapse.", animate=True)
+                    interface.log("The blow drops you. The ground comes up, and the noise of the fight goes far away.", animate=True)
                     combat_log.append("player defeated")
                     result = "defeat"
                     break
 
         # check victory
         if result == "ongoing" and all(e["hp"] <= 0 for e in enemies):
-            interface.log("The fight ends.", animate=True)
+            interface.log(_line([
+                "The last of them goes down, and the noise drains out of the place.",
+                "It's over. You're still standing, breathing hard.",
+                "Quiet comes back. Nothing left moving but you.",
+            ], ""), animate=True)
             combat_log.append("all enemies defeated")
             result = "victory"
 

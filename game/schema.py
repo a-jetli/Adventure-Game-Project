@@ -50,6 +50,23 @@ class QuestUpdate(BaseModel):
     stage: str | None = None
 
 
+class NPCUpdate(BaseModel):
+    id: str  # stable slug — REUSE the existing id if this NPC already exists
+    name: str | None = None
+    role: str | None = None  # archetype tag (merchant, guard, commoner, ...)
+    location: str | None = None  # where they are / declared they'll be next
+    disposition_delta: int = 0
+    description: str | None = None  # set once, on first meeting
+    voice: str | None = None  # set once, on first meeting
+    note: str | None = None  # a durable fact to append (promise, knowledge)
+    present: bool = True  # are they in the scene this turn
+
+
+class WorldFactItem(BaseModel):
+    text: str
+    location: str | None = None  # null = global / world-level fact
+
+
 class EnemyDescriptor(BaseModel):
     enemy_type: str
     difficulty: Literal["trivial", "easy", "medium", "hard", "deadly"]
@@ -62,9 +79,11 @@ class EnemyDescriptor(BaseModel):
 class StateChanges(BaseModel):
     location: str | None = None
     location_is_new: bool = False
+    location_type: str | None = None  # archetype tag, set when location_is_new
+    location_summary: str | None = None  # short gist of the place; tooltip + log header
+    from_direction: str | None = None  # how the player travelled here from the last place
     inventory: InventoryUpdate = Field(default_factory=InventoryUpdate)
-    npc_encountered: str | None = None
-    relationship_delta: dict[str, int] = Field(default_factory=dict)
+    npcs: list[NPCUpdate] = Field(default_factory=list)
     new_log_needed: bool = False
     combat_triggered: bool = False
     encounter: EnemyDescriptor | None = None
@@ -72,8 +91,26 @@ class StateChanges(BaseModel):
     hp_delta: int = 0
     quest_added: Quest | None = None
     quest_updated: QuestUpdate | None = None
+    world_facts_add: list[WorldFactItem] = Field(default_factory=list)
 
 
 class LLMResponse(BaseModel):
     narrative: str
     state_changes: StateChanges
+
+
+class WorldDevelopment(BaseModel):
+    """One small thing that shifted in the world offscreen, between scenes. Only
+    ever advances things that already exist — see the world-director prompt."""
+    summary: str  # one-line description of what changed
+    world_fact: str | None = None  # a durable consequence to record
+    world_fact_location: str | None = None  # place it's tied to (null = global)
+    npc_id: str | None = None  # an EXISTING npc this concerns (reuse exact id)
+    npc_new_location: str | None = None  # where that npc moved to
+    npc_note: str | None = None  # a durable fact to append to that npc
+    quest_id: str | None = None  # an EXISTING active quest to nudge
+    quest_stage: str | None = None  # present-tense progress line for it
+
+
+class WorldTick(BaseModel):
+    developments: list[WorldDevelopment] = Field(default_factory=list)

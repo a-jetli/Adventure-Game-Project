@@ -3,68 +3,191 @@ import threading
 import re
 import time
 
+# get_input returns this when the player presses Esc mid-play; the game loop
+# opens the pause menu instead of quitting.
+PAUSE_SENTINEL = "\x00pause"
+
 
 # ── base surface ────────────────────────────────────────────────────────────
-BG_COLOR = (20, 22, 27)
-TEXT_COLOR = (220, 223, 229)
+# Larger glyphs read more clearly on the OS-upscaled (non-HiDPI) mainline-pygame
+# surface; this is the practical readability ceiling without switching to
+# pygame-ce for a true Retina drawable.
+FONT_SIZE = 18
+
+# Default theme is "dark" — Brittany Chiang's Halcyon palette: a deep slate base
+# (1d2433 / 171c28), cool blue-grey text, with gold / cyan / green / blue / coral
+# accents. Mapped by role (player=gold signature, places=blue, items=green,
+# usable=cyan, danger=coral, magic=purple).
+BG_COLOR = (29, 36, 51)                  # 1d2433
+TEXT_COLOR = (215, 220, 226)             # d7dce2 — bright, for long reading
 
 # ── input bar ─────────────────────────────────────────────────────────────────
-INPUT_BG = (32, 36, 43)
-INPUT_BORDER = (80, 88, 102)
-INPUT_TEXT = (231, 234, 240)
-INPUT_SELECTION_BG = (60, 96, 152)
+INPUT_BG = (23, 28, 40)                  # 171c28 — recessed well
+INPUT_BORDER = (47, 59, 84)              # 2f3b54
+INPUT_TEXT = (215, 220, 226)             # d7dce2
+INPUT_SELECTION_BG = (58, 77, 115)       # slate-blue selection
 
 # ── menus ─────────────────────────────────────────────────────────────────────
-MENU_OVERLAY = (6, 8, 12, 205)
-MENU_PANEL_BG = (26, 30, 37)
-MENU_PANEL_BORDER = (96, 104, 122)
-MENU_BUTTON_BG = (46, 52, 64)
-MENU_BUTTON_HOVER = (74, 86, 108)
-MENU_BUTTON_TEXT = (230, 234, 242)
+MENU_OVERLAY = (10, 13, 20, 210)
+MENU_PANEL_BG = (29, 36, 51)             # 1d2433
+MENU_PANEL_BORDER = (61, 76, 107)        # lifted slate 3d4c6b
+MENU_BUTTON_BG = (47, 59, 84)            # 2f3b54
+MENU_BUTTON_HOVER = (61, 76, 107)        # 3d4c6b
+MENU_BUTTON_TEXT = (215, 220, 226)       # d7dce2
 
 # ── accents ───────────────────────────────────────────────────────────────────
-PROMPT_COLOR = (118, 152, 132)
-SYSTEM_COLOR = (134, 142, 154)
-CURSOR_COLOR = (231, 234, 240)
+PROMPT_COLOR = (255, 204, 102)           # ffcc66 — Halcyon's signature gold
+SYSTEM_COLOR = (150, 166, 204)           # 96a6cc — secondary text
+CURSOR_COLOR = (215, 220, 226)           # d7dce2
 
 # ── command toolbar (collapsible, top) ──────────────────────────────────────────
-HINT_PANEL_BG = (28, 31, 38, 105)       # faint, sits back in the background
-HINT_PANEL_BORDER = (56, 62, 74, 70)
-HINT_LABEL_COLOR = (116, 130, 150)      # the "[+] Commands" toggle label
-HINT_TEXT_COLOR = (102, 110, 122)       # command tokens, dim
-HINT_EDGE_GAP = 12                      # gap from the window's right/top edge
-HINT_TEXT_GAP = 16                      # gap between narrative text and the widget
+HINT_PANEL_BG = (23, 28, 40, 150)        # 171c28, faint
+HINT_PANEL_BORDER = (47, 59, 84, 110)    # 2f3b54
+HINT_LABEL_COLOR = (150, 166, 204)       # 96a6cc — the "[+] Commands" toggle label
+HINT_TEXT_COLOR = (102, 121, 164)        # 6679a4 — command tokens, dim
+HINT_EDGE_GAP = 12                       # gap from the window's right/top edge
+HINT_TEXT_GAP = 16                       # gap between narrative text and the widget
 
 # ── narrative highlights ────────────────────────────────────────────────────────
-HIGHLIGHT_NAME = (238, 208, 122)        # the player — warm gold
-HIGHLIGHT_NPC = (240, 164, 118)         # people — orange
-HIGHLIGHT_LOCATION = (122, 198, 230)    # named places — sky blue
-HIGHLIGHT_ITEM = (150, 208, 132)        # carried/known items — green
-HIGHLIGHT_DESCRIPTOR = (168, 188, 168)  # words drawn from place names — sage
-HIGHLIGHT_TIME = (194, 174, 232)        # time of day / light — lavender
-HIGHLIGHT_DANGER = (235, 116, 110)      # violence / threat — red
-HIGHLIGHT_INTERACT = (120, 204, 192)    # usable features — teal
-HIGHLIGHT_DIRECTION = (142, 168, 206)   # compass headings — steel blue
-HIGHLIGHT_NATURE = (180, 196, 120)      # terrain / weather — olive
-HIGHLIGHT_MAGIC = (214, 142, 218)       # the arcane — orchid
-HIGHLIGHT_COMBAT = (236, 126, 120)      # combat log text — red
+HIGHLIGHT_NAME = (255, 204, 102)         # the player — ffcc66 gold (the signature)
+HIGHLIGHT_NPC = (255, 174, 87)           # people — ffae57 orange
+HIGHLIGHT_LOCATION = (99, 166, 255)      # named places — 63a6ff blue
+HIGHLIGHT_ITEM = (186, 230, 126)         # carried/known items — bae67e green
+HIGHLIGHT_DESCRIPTOR = (102, 121, 164)   # words drawn from place names — 6679a4, dim
+HIGHLIGHT_TIME = (255, 213, 128)         # time of day / light — ffd580 pale amber
+HIGHLIGHT_DANGER = (239, 107, 115)       # violence / threat — ef6b73 coral
+HIGHLIGHT_INTERACT = (92, 207, 230)      # usable features — 5ccfe6 cyan
+HIGHLIGHT_DIRECTION = (150, 166, 204)    # compass headings — 96a6cc steel
+HIGHLIGHT_NATURE = (143, 199, 162)       # terrain / weather — soft sage-teal
+HIGHLIGHT_MAGIC = (195, 166, 255)        # the arcane — c3a6ff Halcyon purple
+HIGHLIGHT_COMBAT = (239, 107, 115)       # combat log text — ef6b73 coral
 
 # base tint for a whole block that describes a newly-entered area — a warm
-# parchment cast so the prose itself reads as "this is a place" while the
-# per-word highlights still show through on top
-AREA_INTRO_COLOR = (214, 205, 180)
+# parchment cast (harmonizing with the gold) so the prose reads as "a place"
+AREA_INTRO_COLOR = (224, 206, 160)
+
+# ── persistent status bar (top) ───────────────────────────────────────────────
+STATUS_BAR_BG = (23, 28, 40)             # 171c28
+STATUS_BAR_BORDER = (47, 59, 84)         # 2f3b54
+STATUS_LABEL_COLOR = (102, 121, 164)     # 6679a4 — the dim "HP" / "Wpn" labels
+STATUS_VALUE_COLOR = (215, 220, 226)     # d7dce2 — the bright values
+STATUS_HP_BG = (47, 59, 84)              # 2f3b54 — empty portion of the HP bar
+STATUS_HP_FILL = (239, 107, 115)         # ef6b73 — filled portion of the HP bar
+
+# ── hover tooltip (elaborates a highlighted word) ─────────────────────────────
+TOOLTIP_BG = (23, 28, 40, 248)           # 171c28
+TOOLTIP_BORDER = (61, 76, 107)           # 3d4c6b
+TOOLTIP_TITLE_COLOR = (255, 204, 102)    # ffcc66 gold
+TOOLTIP_TEXT_COLOR = (162, 170, 188)     # a2aabc
 
 PARAGRAPH_GAP = 10
 
 
+# ── themes ────────────────────────────────────────────────────────────────────
+# Every colour above is the "dark" theme. A theme is just a dict of overrides for
+# these names; apply_theme() swaps the module globals, and because every render
+# call reads the names at call-time, the whole UI recolours with no other change.
+_THEME_KEYS = [
+    "BG_COLOR", "TEXT_COLOR", "INPUT_BG", "INPUT_BORDER", "INPUT_TEXT",
+    "INPUT_SELECTION_BG", "MENU_OVERLAY", "MENU_PANEL_BG", "MENU_PANEL_BORDER",
+    "MENU_BUTTON_BG", "MENU_BUTTON_HOVER", "MENU_BUTTON_TEXT", "PROMPT_COLOR",
+    "SYSTEM_COLOR", "CURSOR_COLOR", "HINT_PANEL_BG", "HINT_PANEL_BORDER",
+    "HINT_LABEL_COLOR", "HINT_TEXT_COLOR", "HIGHLIGHT_NAME", "HIGHLIGHT_NPC",
+    "HIGHLIGHT_LOCATION", "HIGHLIGHT_ITEM", "HIGHLIGHT_DESCRIPTOR", "HIGHLIGHT_TIME",
+    "HIGHLIGHT_DANGER", "HIGHLIGHT_INTERACT", "HIGHLIGHT_DIRECTION", "HIGHLIGHT_NATURE",
+    "HIGHLIGHT_MAGIC", "HIGHLIGHT_COMBAT", "AREA_INTRO_COLOR", "STATUS_BAR_BG",
+    "STATUS_BAR_BORDER", "STATUS_LABEL_COLOR", "STATUS_VALUE_COLOR", "STATUS_HP_BG",
+    "STATUS_HP_FILL", "TOOLTIP_BG", "TOOLTIP_BORDER", "TOOLTIP_TITLE_COLOR",
+    "TOOLTIP_TEXT_COLOR",
+]
+
+_THEME_DARK = {k: globals()[k] for k in _THEME_KEYS}
+
+# "light" — warm paper, inspired by Solarized Light + a parchment cast. Reads like
+# an old book page; accents are deepened so they stay legible on cream.
+_THEME_LIGHT = {**_THEME_DARK, **{
+    "BG_COLOR": (244, 238, 222), "TEXT_COLOR": (58, 54, 46),
+    "INPUT_BG": (252, 248, 238), "INPUT_BORDER": (205, 193, 168),
+    "INPUT_TEXT": (50, 46, 38), "INPUT_SELECTION_BG": (214, 224, 238),
+    "MENU_OVERLAY": (40, 36, 28, 140), "MENU_PANEL_BG": (250, 245, 233),
+    "MENU_PANEL_BORDER": (208, 196, 170), "MENU_BUTTON_BG": (236, 228, 210),
+    "MENU_BUTTON_HOVER": (224, 214, 190), "MENU_BUTTON_TEXT": (58, 54, 46),
+    "PROMPT_COLOR": (150, 100, 12), "SYSTEM_COLOR": (104, 96, 78),
+    "CURSOR_COLOR": (50, 46, 38), "HINT_PANEL_BG": (236, 228, 210, 150),
+    "HINT_PANEL_BORDER": (208, 196, 170, 120), "HINT_LABEL_COLOR": (116, 108, 90),
+    "HINT_TEXT_COLOR": (140, 130, 110), "HIGHLIGHT_NAME": (150, 100, 12),
+    "HIGHLIGHT_NPC": (177, 90, 32), "HIGHLIGHT_LOCATION": (38, 108, 158),
+    "HIGHLIGHT_ITEM": (63, 125, 58), "HIGHLIGHT_DESCRIPTOR": (138, 128, 104),
+    "HIGHLIGHT_TIME": (150, 104, 40), "HIGHLIGHT_DANGER": (178, 58, 52),
+    "HIGHLIGHT_INTERACT": (28, 134, 120), "HIGHLIGHT_DIRECTION": (74, 106, 150),
+    "HIGHLIGHT_NATURE": (95, 125, 46), "HIGHLIGHT_MAGIC": (122, 79, 176),
+    "HIGHLIGHT_COMBAT": (178, 58, 52), "AREA_INTRO_COLOR": (120, 92, 44),
+    "STATUS_BAR_BG": (236, 228, 210), "STATUS_BAR_BORDER": (208, 196, 170),
+    "STATUS_LABEL_COLOR": (130, 120, 100), "STATUS_VALUE_COLOR": (52, 48, 40),
+    "STATUS_HP_BG": (222, 206, 196), "STATUS_HP_FILL": (188, 80, 72),
+    "TOOLTIP_BG": (250, 245, 233, 250), "TOOLTIP_BORDER": (200, 188, 162),
+    "TOOLTIP_TITLE_COLOR": (120, 82, 24), "TOOLTIP_TEXT_COLOR": (78, 72, 60),
+}}
+
+# "earthy" — Gruvbox (dark, material): warm bark-brown base, cream fg, and the
+# Gruvbox accent set (yellow / orange / aqua / green / blue / red / purple).
+_THEME_EARTHY = {**_THEME_DARK, **{
+    "BG_COLOR": (40, 40, 40), "TEXT_COLOR": (235, 219, 178),
+    "INPUT_BG": (50, 48, 47), "INPUT_BORDER": (102, 92, 84),
+    "INPUT_TEXT": (235, 219, 178), "INPUT_SELECTION_BG": (80, 73, 69),
+    "MENU_OVERLAY": (20, 18, 16, 210), "MENU_PANEL_BG": (50, 48, 46),
+    "MENU_PANEL_BORDER": (102, 92, 84), "MENU_BUTTON_BG": (60, 56, 54),
+    "MENU_BUTTON_HOVER": (80, 73, 69), "MENU_BUTTON_TEXT": (235, 219, 178),
+    "PROMPT_COLOR": (250, 189, 47), "SYSTEM_COLOR": (213, 196, 161),
+    "CURSOR_COLOR": (235, 219, 178), "HINT_PANEL_BG": (50, 48, 46, 130),
+    "HINT_PANEL_BORDER": (102, 92, 84, 90), "HINT_LABEL_COLOR": (168, 153, 132),
+    "HINT_TEXT_COLOR": (146, 131, 116), "HIGHLIGHT_NAME": (250, 189, 47),
+    "HIGHLIGHT_NPC": (254, 128, 25), "HIGHLIGHT_LOCATION": (131, 165, 152),
+    "HIGHLIGHT_ITEM": (184, 187, 38), "HIGHLIGHT_DESCRIPTOR": (168, 153, 132),
+    "HIGHLIGHT_TIME": (216, 178, 120), "HIGHLIGHT_DANGER": (251, 73, 52),
+    "HIGHLIGHT_INTERACT": (142, 192, 124), "HIGHLIGHT_DIRECTION": (146, 131, 116),
+    "HIGHLIGHT_NATURE": (152, 151, 26), "HIGHLIGHT_MAGIC": (211, 134, 155),
+    "HIGHLIGHT_COMBAT": (251, 73, 52), "AREA_INTRO_COLOR": (216, 182, 120),
+    "STATUS_BAR_BG": (50, 48, 46), "STATUS_BAR_BORDER": (80, 73, 69),
+    "STATUS_LABEL_COLOR": (168, 153, 132), "STATUS_VALUE_COLOR": (235, 219, 178),
+    "STATUS_HP_BG": (60, 40, 36), "STATUS_HP_FILL": (251, 73, 52),
+    "TOOLTIP_BG": (40, 37, 34, 248), "TOOLTIP_BORDER": (102, 92, 84),
+    "TOOLTIP_TITLE_COLOR": (250, 189, 47), "TOOLTIP_TEXT_COLOR": (213, 196, 161),
+}}
+
+THEMES = {"dark": _THEME_DARK, "light": _THEME_LIGHT, "earthy": _THEME_EARTHY}
+THEME_LABELS = {"dark": "Dark", "light": "Light", "earthy": "Earthy & warm"}
+CURRENT_THEME = "dark"
+
+
+def apply_theme(name: str):
+    """Recolour the whole UI to a named theme by swapping the colour globals."""
+    global CURRENT_THEME
+    theme = THEMES.get(name)
+    if not theme:
+        return
+    CURRENT_THEME = name
+    globals().update(theme)
+
+
 class TextBlock:
-    def __init__(self, text: str, color=None, is_player=False, highlights=None):
+    def __init__(self, text: str, role="narrative", is_player=False, highlights=None, entities=None):
         self.text = text
-        self.color = color or TEXT_COLOR
+        # semantic role, resolved to a colour at render time so a live theme
+        # switch recolours blocks already on screen (see GameUI._role_color).
+        self.role = role
         self.is_player = is_player
         self.highlights = highlights or {}
+        # maps a character position -> the lowercase name of the thing there
+        # (a person, place, or item), used to show a tooltip on hover
+        self.entities = entities or {}
+        # when set, this block renders as a bordered info card (inventory, etc.)
+        self.panel_title: str | None = None
         self.chars_shown = 0
         self.fully_revealed = False
+        # cached pixel height: (wrap_width, chars_or_-1) -> total height
+        self._h_key = None
+        self._h = 0
 
     def reveal_all(self):
         self.chars_shown = len(self.text)
@@ -72,7 +195,7 @@ class TextBlock:
 
 
 class GameUI:
-    def __init__(self, width=900, height=600):
+    def __init__(self, width=1120, height=740):
         pygame.init()
         self.base_width = width
         self.base_height = height
@@ -92,11 +215,12 @@ class GameUI:
         self.width = width
         self.height = height
 
-        self.font = pygame.font.SysFont("Menlo", 17)
+        self.font = pygame.font.SysFont("Menlo", FONT_SIZE)
         if not self.font:
-            self.font = pygame.font.SysFont("Consolas", 17)
+            self.font = pygame.font.SysFont("Consolas", FONT_SIZE)
         if not self.font:
-            self.font = pygame.font.SysFont("Courier", 17)
+            self.font = pygame.font.SysFont("Courier", FONT_SIZE)
+        self.small_font = pygame.font.SysFont("Menlo", max(12, FONT_SIZE - 4))
 
         self.line_height = self.font.get_linesize() + 3
         self.margin_left = 24
@@ -108,6 +232,7 @@ class GameUI:
 
         self.lock = threading.RLock()
         self.blocks: list[TextBlock] = []
+        self._stream_block: TextBlock | None = None  # narrative block being streamed
         self.input_text = ""
         self.input_cursor_pos = 0
         self.input_selection_anchor: int | None = None
@@ -124,6 +249,10 @@ class GameUI:
         self._hint_cache = None
         self.typewriter_speed = 120
         self.typewriter_timer = 0
+        # animated "thinking" indicator shown while a turn generates
+        self.loading = False
+        self.loading_phase = 0
+        self.loading_timer = 0.0
         self.running = True
         self.pending_input = None
         self.input_ready = threading.Event()
@@ -167,16 +296,46 @@ class GameUI:
         self.known_items: list[str] = []
         self.known_descriptors: list[str] = []
         self.known_npcs: list[str] = []
+        # name (lowercase) -> elaboration string, for hover tooltips
+        self.entity_info: dict[str, str] = {}
+
+        # persistent status bar (HP / location / time / equipped gear)
+        self.status_ready = False
+        self.status_bar_height = 34
+        self.stat_hp = 0
+        self.stat_max_hp = 0
+        self.stat_location = ""
+        self.stat_time = ""
+        self.stat_weapon = ""
+        self.stat_armor = ""
+
+        # hover tooltips over highlighted words
+        self.hover_regions: list[tuple[pygame.Rect, str]] = []
+        self.hover_key: str | None = None
 
     # ── context ──────────────────────────────────────────────────────────────
 
-    def set_context(self, player_name: str, locations: list[str], items: list[str], npcs: list[str] | None = None):
+    def set_context(self, player_name: str, locations: list[str], items: list[str],
+                    npcs: list[str] | None = None, info: dict[str, str] | None = None):
         with self.lock:
             self.player_name = player_name
             self.known_locations = locations
             self.known_items = items
             self.known_descriptors = self._extract_location_descriptors(locations)
             self.known_npcs = npcs or []
+            self.entity_info = {k.lower(): v for k, v in (info or {}).items()}
+
+    def set_status(self, hp: int, max_hp: int, location: str, time_label: str,
+                   weapon: str, armor: str):
+        """Feed the persistent top status bar. Once called, the bar shows."""
+        with self.lock:
+            self.stat_hp = hp
+            self.stat_max_hp = max_hp
+            self.stat_location = location
+            self.stat_time = time_label
+            self.stat_weapon = weapon
+            self.stat_armor = armor
+            self.status_ready = True
 
     def _extract_location_descriptors(self, locations: list[str]) -> list[str]:
         stopwords = {
@@ -198,45 +357,122 @@ class GameUI:
 
     def add_narrative(self, text: str, area_intro: bool = False):
         with self.lock:
-            highlights = self._build_highlights(text)
-            base_color = AREA_INTRO_COLOR if area_intro else TEXT_COLOR
-            block = TextBlock(text, base_color, is_player=False, highlights=highlights)
+            highlights, entities = self._build_highlights(text)
+            role = "area_intro" if area_intro else "narrative"
+            block = TextBlock(text, role, is_player=False,
+                              highlights=highlights, entities=entities)
             self.blocks.append(block)
             self._scroll_to_bottom()  # always scroll for new narrative
 
-    def add_player_input(self, text: str):
+    def begin_narrative_stream(self):
+        """Open an empty narrative block that grows as deltas arrive. Highlights
+        are deferred to end_narrative_stream (they depend on post-turn state)."""
         with self.lock:
-            block = TextBlock(f">> {text}", PROMPT_COLOR, is_player=True)
-            block.reveal_all()
+            block = TextBlock("", "narrative", is_player=False)
+            self._stream_block = block
             self.blocks.append(block)
             self._scroll_to_bottom()
 
-    def add_system(self, text: str):
+    def append_narrative_stream(self, delta: str):
+        """Append streamed text to the open narrative block. The typewriter
+        (chars_shown) trails behind at reading pace, smoothing bursty chunks."""
+        with self.lock:
+            block = self._stream_block
+            if block is None:
+                return
+            was_at_bottom = self._is_at_bottom()
+            block.text += delta
+            block._h_key = None  # invalidate cached height; content grew
+            if was_at_bottom:
+                self._scroll_to_bottom()
+
+    def end_narrative_stream(self, final_text: str, area_intro: bool = False):
+        """Finish off the block we were streaming into: replace its text with the
+        final cleaned-up version, work out which words to highlight now that state
+        is updated, and tint the block if this turn entered a new place. The
+        type-on animation keeps playing to the end."""
+        with self.lock:
+            block = self._stream_block
+            self._stream_block = None
+            if block is None:
+                return
+            highlights, entities = self._build_highlights(final_text)
+            block.text = final_text
+            block.highlights = highlights
+            block.entities = entities
+            block.role = "area_intro" if area_intro else "narrative"
+            block._h_key = None
+            block.chars_shown = min(block.chars_shown, len(final_text))
+            if len(final_text) == 0:
+                block.fully_revealed = True
+
+    def add_player_input(self, text: str):
+        with self.lock:
+            block = TextBlock(f">> {text}", "player", is_player=True)
+            block.reveal_all()  # the player's own echoed input is always instant
+            self.blocks.append(block)
+            self._scroll_to_bottom()
+
+    def add_system(self, text: str, instant: bool = False):
         with self.lock:
             # Check before appending: a tall block (inventory, quest log) grows
             # content height past the _is_at_bottom tolerance, so checking after
             # the append would wrongly report "not at bottom" and skip scrolling.
             was_at_bottom = self._is_at_bottom()
-            block = TextBlock(text, SYSTEM_COLOR, is_player=False)
-            block.reveal_all()
+            block = TextBlock(text, "system", is_player=False)
+            if instant:  # ephemeral chrome (the "..." spinner) shouldn't stream
+                block.reveal_all()
             self.blocks.append(block)
             if was_at_bottom:  # only scroll if we were already at bottom
                 self._scroll_to_bottom()
 
-    def add_combat_text(self, text: str, animate: bool = False):
+    def add_panel(self, title: str, body: str):
+        """A bordered info card (inventory, quests, people…) — easier to read
+        than plain lines. Rendered instantly, never streamed."""
         with self.lock:
             was_at_bottom = self._is_at_bottom()
-            block = TextBlock(text, HIGHLIGHT_COMBAT, is_player=False)
+            block = TextBlock(body, "panel", is_player=False)
+            block.panel_title = title
+            block.reveal_all()
+            self.blocks.append(block)
+            if was_at_bottom:
+                self._scroll_to_bottom()
+
+    def add_combat_text(self, text: str, animate: bool = True):
+        with self.lock:
+            was_at_bottom = self._is_at_bottom()
+            block = TextBlock(text, "combat", is_player=False)
             if not animate:
                 block.reveal_all()
             self.blocks.append(block)
             if was_at_bottom:  # only scroll if we were already at bottom
                 self._scroll_to_bottom()
 
-    def remove_loading_indicator(self):
+    def start_loading(self):
+        """Show an animated 'thinking' indicator at the end of the transcript
+        while a turn generates."""
         with self.lock:
-            if self.blocks and self.blocks[-1].text == "...":
-                self.blocks.pop()
+            if not any(b.role == "loading" for b in self.blocks):
+                block = TextBlock("", "loading")
+                block.reveal_all()
+                self.blocks.append(block)
+            self.loading = True
+            self.loading_phase = 0
+            self.loading_timer = 0.0
+            self._scroll_to_bottom()
+
+    def stop_loading(self):
+        with self.lock:
+            self.loading = False
+            self.blocks = [b for b in self.blocks if b.role != "loading"]
+
+    def clear(self):
+        """Wipe the transcript. Used when a game starts so menu-phase output
+        (tutorial cards, 'theme set', 'loading…') doesn't bleed into play."""
+        with self.lock:
+            self.blocks = []
+            self.scroll_offset = 0
+            self.hover_regions = []
 
     # ── input / menu / combat hud ─────────────────────────────────────────────
 
@@ -283,9 +519,13 @@ class GameUI:
         self.combat_intro_ready.clear()
 
     def wait_for_combat_intro(self):
+        if not self.running:
+            return
         self.combat_intro_ready.wait()
 
     def show_combat_hud(self, title: str, status_lines: list[tuple[str, int | None]], options: list[tuple[str, str]], layout: str = "horizontal") -> str:
+        if not self.running:  # shutting down mid-combat: unwind without blocking
+            return "flee"
         with self.lock:
             self.combat_title = title
             self.combat_status_lines = status_lines
@@ -305,19 +545,23 @@ class GameUI:
             choice = self.combat_choice
             self.combat_active = False
             self.combat_button_rects = []
-        return choice
-
-    def end_combat_hud(self):
-        self.combat_active = False
-        self.combat_button_rects = []
+        return "flee" if not self.running else choice
 
     def wait_for_text_output(self):
-        while True:
+        while self.running:
             with self.lock:
                 done = all(b.fully_revealed for b in self.blocks)
             if done:
                 break
             time.sleep(0.01)
+
+    def _release_all_waiters(self):
+        """Unblock every thread parked on a UI event. Called on shutdown so the
+        game thread never sits on a wait() that will no longer be set."""
+        self.input_ready.set()
+        self.menu_ready.set()
+        self.combat_ready.set()
+        self.combat_intro_ready.set()
 
     # ── clipboard ─────────────────────────────────────────────────────────────
 
@@ -427,38 +671,38 @@ class GameUI:
 
     # ── highlighting ──────────────────────────────────────────────────────────
 
-    def _build_highlights(self, text: str) -> dict:
+    def _build_highlights(self, text: str) -> tuple[dict, dict]:
         highlights = {}
+        entities = {}  # character position -> the thing's lowercase name, for tooltips
+
+        def mark(span_start, span_end, color, key=None):
+            for i in range(span_start, span_end):
+                if i not in highlights:
+                    highlights[i] = color
+                    if key is not None:
+                        entities[i] = key
+
         if self.player_name:
             for m in re.finditer(re.escape(self.player_name), text, re.IGNORECASE):
-                for i in range(m.start(), m.end()):
-                    highlights[i] = HIGHLIGHT_NAME
+                mark(m.start(), m.end(), HIGHLIGHT_NAME, self.player_name.lower())
         for loc in self.known_locations:
             if len(loc) < 3:
                 continue
             for m in re.finditer(re.escape(loc), text, re.IGNORECASE):
-                for i in range(m.start(), m.end()):
-                    if i not in highlights:
-                        highlights[i] = HIGHLIGHT_LOCATION
+                mark(m.start(), m.end(), HIGHLIGHT_LOCATION, loc.lower())
         for item in self.known_items:
             if len(item) < 3:
                 continue
             for m in re.finditer(re.escape(item), text, re.IGNORECASE):
-                for i in range(m.start(), m.end()):
-                    if i not in highlights:
-                        highlights[i] = HIGHLIGHT_ITEM
+                mark(m.start(), m.end(), HIGHLIGHT_ITEM, item.lower())
         for descriptor in self.known_descriptors:
             for m in re.finditer(rf"\b{re.escape(descriptor)}\b", text, re.IGNORECASE):
-                for i in range(m.start(), m.end()):
-                    if i not in highlights:
-                        highlights[i] = HIGHLIGHT_DESCRIPTOR
+                mark(m.start(), m.end(), HIGHLIGHT_DESCRIPTOR)
         for npc in self.known_npcs:
             if len(npc) < 3:
                 continue
             for m in re.finditer(re.escape(npc), text, re.IGNORECASE):
-                for i in range(m.start(), m.end()):
-                    if i not in highlights:
-                        highlights[i] = HIGHLIGHT_NPC
+                mark(m.start(), m.end(), HIGHLIGHT_NPC, npc.lower())
         # Order is precedence: earlier groups win a word over later ones, and all
         # of these lose to the dynamic categories (name/location/item/npc) above.
         keyword_groups = [
@@ -502,7 +746,7 @@ class GameUI:
                     for i in range(m.start(), m.end()):
                         if i not in highlights:
                             highlights[i] = color
-        return highlights
+        return highlights, entities
 
     # ── text layout ───────────────────────────────────────────────────────────
 
@@ -566,30 +810,74 @@ class GameUI:
         visible_text = block.text[:block.chars_shown]
         return self._wrap_text(visible_text)
 
+    def _role_color(self, role: str):
+        """Resolve a block's semantic role to a current-theme colour, so a live
+        theme switch recolours blocks already on screen."""
+        return {
+            "area_intro": AREA_INTRO_COLOR,
+            "system": SYSTEM_COLOR,
+            "player": PROMPT_COLOR,
+            "combat": HIGHLIGHT_COMBAT,
+        }.get(role, TEXT_COLOR)
+
+    def _block_height(self, block: TextBlock) -> int:
+        """How tall this block is in pixels, including the gap after it. The result
+        is remembered (keyed on the wrap width and how much has been revealed) so we
+        only do the costly text-wrapping when one of those actually changes, instead
+        of re-wrapping every block on screen every single frame."""
+        if block.role == "loading":
+            return self.line_height + 12
+        if block.panel_title is not None:
+            return self._panel_height(block) + 12
+        w = self._wrap_width()
+        key = (w, -1 if block.fully_revealed else block.chars_shown)
+        if block._h_key == key:
+            return block._h
+        text = block.text if block.fully_revealed else block.text[:block.chars_shown]
+        h = 0
+        for _, has_gap, _ in self._wrap_text(text):
+            h += self.line_height
+            if has_gap:
+                h += PARAGRAPH_GAP
+        h += 12
+        block._h_key = key
+        block._h = h
+        return h
+
+    def rehighlight_all(self):
+        """Recompute highlights for on-screen blocks against the current context
+        (used after a theme switch so accent colours match the new palette)."""
+        with self.lock:
+            for b in self.blocks:
+                if b.is_player or b.panel_title is not None:
+                    continue
+                b.highlights, b.entities = self._build_highlights(b.text)
+
     def _total_content_height(self) -> int:
         with self.lock:
-            total = 0
-            for block in self.blocks:
-                text = block.text if block.fully_revealed else block.text[:block.chars_shown]
-                lines = self._wrap_text(text)
-                for _, has_gap, _ in lines:
-                    total += self.line_height
-                    if has_gap:
-                        total += PARAGRAPH_GAP
-                total += 12
-            return total
+            return sum(self._block_height(b) for b in self.blocks)
 
     # ── command toolbar layout (top-right corner) ───────────────────────────────
 
     def _hints_visible(self) -> bool:
         return not self.combat_active and not self.menu_active
 
+    def _status_visible(self) -> bool:
+        return self.status_ready and not self.combat_active and not self.menu_active
+
+    def _text_top(self) -> int:
+        """Top of the scrolling text area — pushed down by the status bar when
+        it's showing."""
+        return self.margin_top + (self.status_bar_height if self._status_visible() else 0)
+
     def _hint_lines(self) -> list[str]:
         header = ("[–] Commands" if self.hints_expanded else "[+] Commands")
         if not self.hints_expanded:
             return [header]
-        return [header, "inventory", "hp", "time", "location", "quests",
-                "use [item]", "equip [item]", "help"]
+        return [header, "inventory", "hp", "time", "location", "map",
+                "quests", "people", "chronicle", "recap",
+                "use [item]", "equip [item]",
+                "/journal", "/settings", "/theme", "/tutorial", "/help"]
 
     def _hint_layout(self) -> tuple[int, int, list[str]]:
         """Returns (widget_w, widget_h, lines), cached per (width, expanded)."""
@@ -610,10 +898,11 @@ class GameUI:
     def _hint_widget_rect(self) -> pygame.Rect:
         widget_w, widget_h, _ = self._hint_layout()
         x = self.width - HINT_EDGE_GAP - widget_w
-        return pygame.Rect(x, self.margin_top, widget_w, widget_h)
+        return pygame.Rect(x, self._text_top(), widget_w, widget_h)
 
     def _wrap_width(self) -> int:
-        """Narrative wrap width, inset on the right to clear the hint widget."""
+        """How wide the story text can be, pulled in on the right so it doesn't run
+        under the command list in the corner."""
         if not self._hints_visible():
             return self.max_text_width
         widget_left = self._hint_widget_rect().left
@@ -622,7 +911,8 @@ class GameUI:
     def _effective_visible_height(self) -> int:
         if self.combat_active:
             return max(100, self.height - self.margin_top - self.combat_panel_height - 14)
-        return self.text_area_height
+        inset = self.status_bar_height if self._status_visible() else 0
+        return self.text_area_height - inset
 
     def _scroll_to_bottom(self):
         with self.lock:
@@ -662,26 +952,49 @@ class GameUI:
     # ── rendering ─────────────────────────────────────────────────────────────
 
     def _render_text_area(self):
+        self.hover_regions = []
         effective_height = self._effective_visible_height()
-        clip_rect = pygame.Rect(0, self.margin_top, self.width, effective_height)
+        text_top = self._text_top()
+        clip_rect = pygame.Rect(0, text_top, self.width, effective_height)
         self.screen.set_clip(clip_rect)
 
-        y = self.margin_top - self.scroll_offset
+        y = text_top - self.scroll_offset
+        bottom = text_top + effective_height
 
         with self.lock:
             for block in self.blocks:
+                h = self._block_height(block)
+                # Wholly off-screen: skip without wrapping (the hot path that
+                # keeps long transcripts at 60fps).
+                if y + h < text_top or y > bottom:
+                    y += h
+                    continue
+
+                if block.role == "loading":
+                    dots = ("." * (1 + self.loading_phase % 3)).ljust(3)
+                    self.screen.blit(self.font.render(dots, True, SYSTEM_COLOR),
+                                     (self.margin_left, y))
+                    y += h
+                    continue
+
+                if block.panel_title is not None:
+                    self._render_panel(block, self.margin_left, y, self._wrap_width())
+                    y += h
+                    continue
+
+                base = self._role_color(block.role)
                 lines = self._get_block_lines(block)
                 for line_text, has_gap, char_offset in lines:
-                    if y + self.line_height < self.margin_top:
+                    if y + self.line_height < text_top:
                         y += self.line_height
                         if has_gap:
                             y += PARAGRAPH_GAP
                         continue
-                    if y > self.margin_top + effective_height:
+                    if y > bottom:
                         break
 
                     if block.is_player or not block.highlights:
-                        surf = self.font.render(line_text, True, block.color)
+                        surf = self.font.render(line_text, True, base)
                         self.screen.blit(surf, (self.margin_left, y))
                     else:
                         self._blit_highlighted_line(line_text, char_offset, block, y)
@@ -697,7 +1010,7 @@ class GameUI:
         content_h = self._total_content_height()
         if content_h > effective_height:
             track_x = self.width - 8
-            track_y = self.margin_top
+            track_y = text_top
             track_h = effective_height
 
             thumb_ratio = effective_height / content_h
@@ -715,31 +1028,78 @@ class GameUI:
         self.screen.set_clip(None)
 
     def _blit_highlighted_line(self, line_text: str, char_offset: int, block: TextBlock, y: int):
-        x = self.margin_left
         if not line_text:
             return
-
-        run_chars = []
+        x = self.margin_left
+        run_chars: list[str] = []
         run_color = None
-        for i, ch in enumerate(line_text):
-            global_idx = char_offset + i
-            color = block.highlights.get(global_idx, block.color)
-            if run_color is None:
-                run_color = color
-                run_chars.append(ch)
-                continue
-            if color != run_color:
-                run_surf = self.font.render("".join(run_chars), True, run_color)
-                self.screen.blit(run_surf, (x, y))
-                x += run_surf.get_width()
-                run_chars = [ch]
-                run_color = color
-            else:
-                run_chars.append(ch)
+        run_key = None
 
-        if run_chars:
+        def flush():
+            nonlocal x, run_chars
+            if not run_chars:
+                return
             run_surf = self.font.render("".join(run_chars), True, run_color)
             self.screen.blit(run_surf, (x, y))
+            w = run_surf.get_width()
+            # remember where each named entity sits so hovering it shows detail
+            if run_key is not None and self.entity_info.get(run_key):
+                rect = pygame.Rect(x, y, w, self.line_height)
+                top, bot = self._text_top(), self._text_top() + self._effective_visible_height()
+                if rect.bottom > top and rect.top < bot:
+                    self.hover_regions.append((rect, run_key))
+            x += w
+            run_chars = []
+
+        base = self._role_color(block.role)
+        for i, ch in enumerate(line_text):
+            global_idx = char_offset + i
+            color = block.highlights.get(global_idx, base)
+            key = block.entities.get(global_idx)
+            if run_color is None:
+                run_color, run_key = color, key
+                run_chars.append(ch)
+                continue
+            if color != run_color or key != run_key:
+                flush()
+                run_color, run_key = color, key
+            run_chars.append(ch)
+        flush()
+
+    # ── info panels (inventory / quests / people …) ──────────────────────────
+
+    def _panel_body_lines(self, text: str, max_w: int) -> list[str]:
+        out = []
+        for raw in text.split("\n"):
+            if not raw.strip() or self._measure_text_width(raw) <= max_w:
+                out.append(raw)
+            else:
+                out.extend(self._wrap_ui_text(raw, max_w))
+        return out
+
+    def _panel_height(self, block: TextBlock) -> int:
+        pad = 10
+        body = self._panel_body_lines(block.text, self._wrap_width() - pad * 2)
+        return pad + self.line_height + 8 + len(body) * self.line_height + pad
+
+    def _render_panel(self, block: TextBlock, x: int, y: int, width: int) -> int:
+        pad = 10
+        body = self._panel_body_lines(block.text, width - pad * 2)
+        panel_h = pad + self.line_height + 8 + len(body) * self.line_height + pad
+        rect = pygame.Rect(x, y, width, panel_h)
+        pygame.draw.rect(self.screen, MENU_PANEL_BG, rect, border_radius=6)
+        pygame.draw.rect(self.screen, MENU_PANEL_BORDER, rect, 1, border_radius=6)
+
+        self.screen.blit(self.font.render(block.panel_title, True, PROMPT_COLOR),
+                         (x + pad, y + pad))
+        divider_y = y + pad + self.line_height + 3
+        pygame.draw.line(self.screen, MENU_PANEL_BORDER,
+                         (x + pad, divider_y), (rect.right - pad, divider_y), 1)
+        by = divider_y + 5
+        for line in body:
+            self.screen.blit(self.font.render(line, True, TEXT_COLOR), (x + pad, by))
+            by += self.line_height
+        return panel_h
 
     def _render_command_hints(self):
         pad = 8
@@ -764,6 +1124,115 @@ class GameUI:
 
         # only the header row toggles; the list area is passive
         self.hint_toggle_rect = pygame.Rect(rect.x, rect.y, widget_w, pad * 2 + line_h)
+
+    def _render_status_bar(self):
+        bar_h = self.status_bar_height - 6
+        bar_rect = pygame.Rect(self.margin_left - 5, 6,
+                               self.width - self.margin_left * 2 + 10, bar_h)
+        pygame.draw.rect(self.screen, STATUS_BAR_BG, bar_rect, border_radius=5)
+        pygame.draw.rect(self.screen, STATUS_BAR_BORDER, bar_rect, 1, border_radius=5)
+
+        cy = bar_rect.centery
+        x = bar_rect.x + 12
+        right_limit = bar_rect.right - 12
+
+        def label(txt: str):
+            nonlocal x
+            s = self.small_font.render(txt, True, STATUS_LABEL_COLOR)
+            self.screen.blit(s, (x, cy - s.get_height() // 2))
+            x += s.get_width() + 6
+
+        def value(txt: str, color=STATUS_VALUE_COLOR, gap: int = 18):
+            nonlocal x
+            s = self.font.render(txt, True, color)
+            self.screen.blit(s, (x, cy - s.get_height() // 2))
+            x += s.get_width() + gap
+
+        if self.player_name:
+            value(self.player_name)
+
+        label("HP")
+        bar_w = 90
+        pygame.draw.rect(self.screen, STATUS_HP_BG, pygame.Rect(x, cy - 6, bar_w, 12), border_radius=3)
+        if self.stat_max_hp > 0:
+            frac = max(0.0, min(1.0, self.stat_hp / self.stat_max_hp))
+            fill_w = int(bar_w * frac)
+            if fill_w > 0:
+                pygame.draw.rect(self.screen, STATUS_HP_FILL, pygame.Rect(x, cy - 6, fill_w, 12), border_radius=3)
+        x += bar_w + 8
+        value(f"{self.stat_hp}/{self.stat_max_hp}")
+
+        if self.stat_location:
+            value(self.stat_location, HIGHLIGHT_LOCATION)
+        if self.stat_time:
+            value(self.stat_time, HIGHLIGHT_TIME)
+
+        # equipped gear, dropped quietly if the window is too narrow to fit it
+        for lbl, val in (("Wpn", self.stat_weapon), ("Arm", self.stat_armor)):
+            if not val:
+                continue
+            lw = self.small_font.size(lbl)[0]
+            vw = self.font.size(val)[0]
+            if x + lw + 6 + vw + 18 > right_limit:
+                break
+            label(lbl)
+            value(val)
+
+    def _render_tooltip(self, mx: int, my: int):
+        if not self.hover_key:
+            return
+        info = self.entity_info.get(self.hover_key)
+        if not info:
+            return
+
+        pad = 10
+        max_w = min(340, self.width - 40)
+        paragraphs = info.split("\n")
+        lines: list[tuple[str, bool]] = []  # (text, is_title)
+        for idx, para in enumerate(paragraphs):
+            wrapped = self._wrap_small(para, max_w - pad * 2) if para.strip() else [""]
+            for w in wrapped:
+                lines.append((w, idx == 0))
+
+        line_h = self.small_font.get_linesize() + 2
+        content_w = max((self.small_font.size(t)[0] for t, _ in lines), default=40)
+        panel_w = min(max_w, content_w + pad * 2)
+        panel_h = len(lines) * line_h + pad * 2
+
+        px = mx + 14
+        py = my + 18
+        if px + panel_w > self.width - 6:
+            px = max(6, mx - panel_w - 14)
+        if py + panel_h > self.height - 6:
+            py = max(6, my - panel_h - 12)
+
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        prect = panel.get_rect()
+        pygame.draw.rect(panel, TOOLTIP_BG, prect, border_radius=6)
+        pygame.draw.rect(panel, TOOLTIP_BORDER, prect, 1, border_radius=6)
+        self.screen.blit(panel, (px, py))
+
+        y = py + pad
+        for text, is_title in lines:
+            color = TOOLTIP_TITLE_COLOR if is_title else TOOLTIP_TEXT_COLOR
+            self.screen.blit(self.small_font.render(text, True, color), (px + pad, y))
+            y += line_h
+
+    def _wrap_small(self, text: str, max_width: int) -> list[str]:
+        words = text.split()
+        if not words:
+            return [""]
+        lines, current = [], ""
+        for word in words:
+            test = current + (" " if current else "") + word
+            if self.small_font.size(test)[0] > max_width and current:
+                lines.append(current)
+                current = word
+            else:
+                current = test
+        if current:
+            lines.append(current)
+        return lines
 
     def _render_input_bar(self):
         bar_y = self.height - self.input_height - 5
@@ -826,8 +1295,20 @@ class GameUI:
         overlay.fill(MENU_OVERLAY)
         self.screen.blit(overlay, (0, 0))
 
-        panel_w = min(520, self.width - 40)
-        panel_h = min(360, self.height - 60)
+        panel_w = min(560, self.width - 40)
+
+        # Size the panel to fit all its options without scrolling when it can
+        # (capped by the window). Short menus — like the opening menu — then
+        # show every choice at once instead of forcing a scroll.
+        sub_lines = self._wrap_ui_text(self.menu_subtitle, panel_w - 44) if self.menu_subtitle else []
+        subtitle_h = len(sub_lines) * self.line_height + 8 if self.menu_subtitle else 0
+        if self.menu_layout == "horizontal":
+            body_h = 44 + 20
+        else:
+            n = max(1, len(self.menu_options))
+            body_h = n * 44 + (n - 1) * 10 + 20
+        needed_h = 54 + subtitle_h + body_h + 12
+        panel_h = min(max(200, needed_h), self.height - 40)
         panel_x = (self.width - panel_w) // 2
         panel_y = (self.height - panel_h) // 2
         panel_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
@@ -861,7 +1342,8 @@ class GameUI:
                 hovered = self.menu_hover_choice == choice
                 pygame.draw.rect(self.screen, MENU_BUTTON_HOVER if hovered else MENU_BUTTON_BG, button_rect, border_radius=6)
                 pygame.draw.rect(self.screen, MENU_PANEL_BORDER, button_rect, 1, border_radius=6)
-                label_surf = self.font.render(f"{idx + 1}) {label}", True, MENU_BUTTON_TEXT)
+                text = self._truncate_to_width(f"{idx + 1}) {label}", button_rect.width - 16)
+                label_surf = self.font.render(text, True, MENU_BUTTON_TEXT)
                 lx = button_rect.x + max(8, (button_rect.width - label_surf.get_width()) // 2)
                 ly = button_rect.y + (button_h - label_surf.get_height()) // 2
                 self.screen.blit(label_surf, (lx, ly))
@@ -879,7 +1361,8 @@ class GameUI:
                 hovered = self.menu_hover_choice == choice
                 pygame.draw.rect(self.screen, MENU_BUTTON_HOVER if hovered else MENU_BUTTON_BG, button_rect, border_radius=6)
                 pygame.draw.rect(self.screen, MENU_PANEL_BORDER, button_rect, 1, border_radius=6)
-                label_surf = self.font.render(f"{idx + 1}) {label}", True, MENU_BUTTON_TEXT)
+                text = self._truncate_to_width(f"{idx + 1}) {label}", button_rect.width - 28)
+                label_surf = self.font.render(text, True, MENU_BUTTON_TEXT)
                 self.screen.blit(label_surf, (button_rect.x + 14, button_rect.y + (button_h - label_surf.get_height()) // 2))
                 self.menu_button_rects.append((button_rect, choice))
                 y += button_h + button_gap
@@ -889,6 +1372,15 @@ class GameUI:
                 hint_surf = self.font.render(hint, True, SYSTEM_COLOR)
                 self.screen.blit(hint_surf, (panel_x + panel_w - 22 - hint_surf.get_width(),
                                              panel_y + panel_h - 16 - hint_surf.get_height()))
+
+    def _truncate_to_width(self, text: str, max_width: int) -> str:
+        """Clip text with an ellipsis so it fits within max_width pixels."""
+        if self._measure_text_width(text) <= max_width:
+            return text
+        ell = "…"
+        while text and self._measure_text_width(text + ell) > max_width:
+            text = text[:-1]
+        return (text + ell) if text else ell
 
     def _wrap_ui_text(self, text: str, max_width: int) -> list[str]:
         words = text.split()
@@ -1009,8 +1501,7 @@ class GameUI:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.running = False
-                self.input_ready.set()
-                self.menu_ready.set()
+                self._release_all_waiters()
                 return
 
             if event.type == pygame.VIDEORESIZE:
@@ -1054,7 +1545,7 @@ class GameUI:
 
                 if self.menu_active:
                     if event.key == pygame.K_ESCAPE:
-                        self.menu_choice = "quit"
+                        self.menu_choice = "__back__"  # back out, don't quit the game
                         self.menu_ready.set()
                         continue
                     if self.menu_layout == "vertical":
@@ -1103,8 +1594,11 @@ class GameUI:
                     self._clear_selection()
                     self.input_ready.set()
                 elif event.key == pygame.K_ESCAPE:
-                    self.running = False
-                    self.input_ready.set()
+                    # Pause instead of quitting — but only when the game is
+                    # actually waiting for a turn (not mid-generation).
+                    if self.awaiting_input:
+                        self.pending_input = PAUSE_SENTINEL
+                        self.input_ready.set()
                 else:
                     mods = pygame.key.get_mods()
                     shortcut_mod = bool(mods & (pygame.KMOD_CTRL | pygame.KMOD_META))
@@ -1235,11 +1729,24 @@ class GameUI:
         if self.combat_active:
             self._render_combat_hud()
         elif not self.menu_active:
+            if self._status_visible():
+                self._render_status_bar()
             self._render_command_hints()
             self._render_input_bar()
         else:
             self._render_menu_overlay()
         self._render_combat_intro()
+
+        # hover tooltip sits on top of everything, in normal play only
+        if not self.menu_active and not self.combat_active:
+            mx, my = pygame.mouse.get_pos()
+            self.hover_key = None
+            for rect, key in self.hover_regions:
+                if rect.collidepoint(mx, my):
+                    self.hover_key = key
+                    break
+            self._render_tooltip(mx, my)
+
         pygame.display.flip()
 
     def tick(self, dt: float):
@@ -1258,4 +1765,9 @@ class GameUI:
         if self.cursor_timer >= 0.5:
             self.cursor_visible = not self.cursor_visible
             self.cursor_timer = 0
+        if self.loading:
+            self.loading_timer += dt
+            if self.loading_timer >= 0.3:
+                self.loading_timer = 0.0
+                self.loading_phase += 1
         self._update_typewriter(dt)
