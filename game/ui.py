@@ -206,6 +206,8 @@ class GameUI:
         )
         pygame.display.set_caption("The Game")
         pygame.key.set_repeat(600, 50)
+        pygame.key.start_text_input()  # deliver typed text via TEXTINPUT events
+        self._suppress_space_textinput = 0  # paired TEXTINPUT(" ")s to swallow after a skip
         self._clipboard_fallback = ""
         try:
             pygame.scrap.init()
@@ -262,6 +264,7 @@ class GameUI:
         self.menu_active = False
         self.menu_title = ""
         self.menu_subtitle = ""
+        self.menu_body = ""  # optional multi-line text shown above the buttons
         self.menu_options: list[tuple[str, str]] = []
         self.menu_choice = ""
         self.menu_ready = threading.Event()
@@ -477,9 +480,14 @@ class GameUI:
     # ── input / menu / combat hud ─────────────────────────────────────────────
 
     def get_input(self, prompt="", allow_empty=False) -> str:
-        self.input_text = ""
-        self.input_cursor_pos = 0
+        # Keep anything typed ahead while the previous turn was still streaming
+        # and animating. During that window awaiting_input is False, but the
+        # event handler keeps accumulating keystrokes into input_text; clearing
+        # it here is what made a half-typed command vanish mid-keystroke. Park
+        # the cursor at the end of whatever's already there.
+        self.input_cursor_pos = len(self.input_text)
         self.input_selection_anchor = None
+        self._suppress_space_textinput = 0
         self.pending_input = None
         self.allow_empty_submit = allow_empty
         self.input_ready.clear()
@@ -488,10 +496,11 @@ class GameUI:
         self.awaiting_input = False
         return self.pending_input or ""
 
-    def show_menu(self, title: str, options: list[tuple[str, str]], subtitle: str = "", layout: str = "vertical") -> str:
+    def show_menu(self, title: str, options: list[tuple[str, str]], subtitle: str = "", layout: str = "vertical", body: str = "") -> str:
         with self.lock:
             self.menu_title = title
             self.menu_subtitle = subtitle
+            self.menu_body = body
             self.menu_options = options
             self.menu_layout = layout
             self.menu_choice = ""
@@ -874,9 +883,9 @@ class GameUI:
         header = ("[–] Commands" if self.hints_expanded else "[+] Commands")
         if not self.hints_expanded:
             return [header]
-        return [header, "inventory", "hp", "time", "location", "map",
-                "quests", "people", "chronicle", "recap",
-                "use [item]", "equip [item]",
+        return [header, "/inventory", "/hp", "/time", "/location", "/map",
+                "/quests", "/people", "/chronicle", "/recap",
+                "/use [item]", "/equip [item]",
                 "/journal", "/settings", "/theme", "/tutorial", "/help"]
 
     def _hint_layout(self) -> tuple[int, int, list[str]]:
@@ -1295,19 +1304,28 @@ class GameUI:
         overlay.fill(MENU_OVERLAY)
         self.screen.blit(overlay, (0, 0))
 
-        panel_w = min(560, self.width - 40)
+        # A body (e.g. the tutorial) is monospace and pre-formatted, so widen the
+        # panel to its longest literal line instead of reflowing it (capped by the
+        # window). Plain menus keep the standard narrow width.
+        body_lines = self.menu_body.split("\n") if self.menu_body else []
+        if body_lines:
+            longest = max(self._measure_text_width(line) for line in body_lines)
+            panel_w = min(max(560, longest + 44), self.width - 40)
+        else:
+            panel_w = min(560, self.width - 40)
 
         # Size the panel to fit all its options without scrolling when it can
         # (capped by the window). Short menus — like the opening menu — then
         # show every choice at once instead of forcing a scroll.
         sub_lines = self._wrap_ui_text(self.menu_subtitle, panel_w - 44) if self.menu_subtitle else []
         subtitle_h = len(sub_lines) * self.line_height + 8 if self.menu_subtitle else 0
+        bodytext_h = (len(body_lines) * self.line_height + 10) if body_lines else 0
         if self.menu_layout == "horizontal":
             body_h = 44 + 20
         else:
             n = max(1, len(self.menu_options))
             body_h = n * 44 + (n - 1) * 10 + 20
-        needed_h = 54 + subtitle_h + body_h + 12
+        needed_h = 54 + subtitle_h + bodytext_h + body_h + 12
         panel_h = min(max(200, needed_h), self.height - 40)
         panel_x = (self.width - panel_w) // 2
         panel_y = (self.height - panel_h) // 2
@@ -1325,6 +1343,13 @@ class GameUI:
                 self.screen.blit(self.font.render(line, True, SYSTEM_COLOR), (panel_x + 22, y))
                 y += self.line_height
             y += 8
+
+        if body_lines:
+            for line in body_lines:
+                self.screen.blit(self.font.render(self._truncate_to_width(line, panel_w - 44), True, INPUT_TEXT),
+                                 (panel_x + 22, y))
+                y += self.line_height
+            y += 10
 
         self.menu_button_rects = []
         button_h = 44
@@ -1517,6 +1542,23 @@ class GameUI:
             if event.type == pygame.WINDOWFOCUSGAINED:
                 self.window_focused = True
 
+            if event.type == pygame.TEXTINPUT:
+                # Printable text arrives here, NOT via KEYDOWN.unicode. On macOS
+                # with press-and-hold enabled, accent-capable keys (a, c, e, i, n,
+                # o, s, u, y, z) deliver an empty KEYDOWN.unicode and only commit
+                # their character through TEXTINPUT — reading unicode dropped them.
+                # Browsers (pygbag) likewise deliver typed text only via TEXTINPUT.
+                if event.text == " " and self._suppress_space_textinput > 0:
+                    # This space was a press to skip the typewriter (handled in the
+                    # KEYDOWN below), not typed input — don't insert it.
+                    self._suppress_space_textinput -= 1
+                    continue
+                if not self.combat_active and not self.menu_active:
+                    text = event.text
+                    if text and text.isprintable():
+                        self._insert_text_at_cursor(text)
+                continue
+
             if event.type == pygame.KEYDOWN:
                 if self.combat_active:
                     if event.key in (pygame.K_1, pygame.K_KP1, pygame.K_a):
@@ -1572,7 +1614,8 @@ class GameUI:
 
                 with self.lock:
                     any_animating = any(not b.fully_revealed for b in self.blocks)
-                typed_cmd = self.input_text.strip().lower()
+                submitted = self.input_text.strip()
+                typed_cmd = submitted.lower()
 
                 if event.key == pygame.K_RETURN and typed_cmd in ("quit", "exit"):
                     self.pending_input = "quit"
@@ -1582,11 +1625,20 @@ class GameUI:
                     self.input_ready.set()
                     continue
 
+                # While the prose is still revealing, Space (and Enter on an empty
+                # line) fast-forwards the typewriter. But Enter on a typed command
+                # should still SUBMIT it — skip the reveal, then fall through to the
+                # submit below rather than swallowing the keypress.
                 if any_animating and event.key in (pygame.K_SPACE, pygame.K_RETURN):
                     self._skip_typewriter()
-                    continue
+                    enter_submits = event.key == pygame.K_RETURN and (submitted or self.allow_empty_submit)
+                    if not enter_submits:
+                        if event.key == pygame.K_SPACE:
+                            # Swallow the paired TEXTINPUT(" ") so skipping doesn't
+                            # drop a stray space into the input box.
+                            self._suppress_space_textinput += 1
+                        continue
 
-                submitted = self.input_text.strip()
                 if event.key == pygame.K_RETURN and (submitted or self.allow_empty_submit):
                     self.pending_input = submitted
                     self.input_text = ""
@@ -1644,11 +1696,10 @@ class GameUI:
                             self.input_text = self.input_text[:pos] + self.input_text[pos + 1:]
                     elif event.key == pygame.K_TAB:
                         continue
-                    elif event.unicode and event.unicode.isprintable():
-                        self._insert_text_at_cursor(event.unicode)
-                    else:
-                        if not shift_mod:
-                            self._clear_selection()
+                    # Printable characters are inserted from the TEXTINPUT event
+                    # above, not from KEYDOWN.unicode: macOS press-and-hold and
+                    # browsers (pygbag) deliver typed text only via TEXTINPUT, so
+                    # reading unicode here silently dropped accent-capable letters.
 
                     if not shift_mod and event.key not in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_HOME, pygame.K_END):
                         if self.input_selection_anchor == self.input_cursor_pos:

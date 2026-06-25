@@ -353,9 +353,31 @@ TUTORIAL_PAGES = [
 
 
 def show_tutorial(ui: GameUI):
-    """Walk a first-time player through every feature, as a stack of cards."""
-    for title, body in TUTORIAL_PAGES:
-        ui.add_panel(title, body)
+    """Walk a first-time player through every feature as a modal popup, paged
+    with Next / Back, rather than dumping cards into the transcript."""
+    i = 0
+    n = len(TUTORIAL_PAGES)
+    while 0 <= i < n:
+        title, body = TUTORIAL_PAGES[i]
+        # Primary action first so Enter always advances (or finishes on the last
+        # page); Esc closes from anywhere.
+        if i < n - 1:
+            options = [("Next", "next")]
+            if i > 0:
+                options.append(("Back", "back"))
+            options.append(("Skip", "close"))
+        else:
+            options = [("Done", "close")]
+            if i > 0:
+                options.append(("Back", "back"))
+        choice = ui.show_menu(title, options, subtitle=f"Page {i + 1} of {n}",
+                              body=body, layout="horizontal")
+        if choice == "next":
+            i += 1
+        elif choice == "back":
+            i -= 1
+        else:  # "close", Esc ("__back__"), or a closed window
+            break
 
 
 def _theme_picker(ui: GameUI):
@@ -506,6 +528,48 @@ def _handle_defeat(ui: GameUI, client, system_prompt, state, hot_context, curren
     save_game(state, hot_context, current_slot)
 
 
+def _handle_combat_aftermath(ui: GameUI, client, system_prompt, state, hot_context,
+                             current_slot, result):
+    """A won or broken-off fight gets a short closing beat, so victory isn't just a
+    dice log handed back: spoils land in inventory, a notable outcome is recorded, and
+    the scene settles. Mirrors _handle_defeat for the non-defeat outcomes. The combat
+    log line is already in hot_context, so the narrator can see how it went."""
+    prompt = (
+        "[The fight is over — you came out on top. Narrate the aftermath and any spoils.]"
+        if result == "victory" else
+        "[You broke off the fight and got clear. Narrate the aftermath and what running cost.]"
+    )
+    ui.start_loading()
+    on_delta, streamed = _streaming_sink(ui)
+    try:
+        aftermath = call_llm(
+            client, system_prompt, state, hot_context[-10:], prompt,
+            config.MODEL_NARRATIVE, session_stats, force_situation="aftermath",
+            on_delta=on_delta,
+        )
+    except Exception:
+        aftermath = None
+    ui.stop_loading()
+    if aftermath is None:
+        return
+    state.apply_state_changes(aftermath.state_changes)
+    _refresh_ui(ui, state)
+    area_intro = aftermath.state_changes.location_is_new
+    if streamed[0]:
+        ui.end_narrative_stream(aftermath.narrative, area_intro=area_intro)
+    else:
+        ui.add_narrative(aftermath.narrative, area_intro=area_intro)
+    _debug_log(state.session_turn, "[aftermath]", aftermath.narrative)
+    snapshot = {
+        "session_turn": state.session_turn,
+        "location": state.location,
+        "time_label": state._time_label(),
+    }
+    threading.Thread(target=process_response, args=(aftermath, snapshot), daemon=True).start()
+    hot_context.append(f"[Aftermath] {aftermath.narrative}")
+    save_game(state, hot_context, current_slot)
+
+
 def _save_and_quit(ui: GameUI, state, hot_context, current_slot):
     """Persist everything and end the session. Shared by typed `quit` and the
     pause menu's Save & quit."""
@@ -573,10 +637,7 @@ def opening_menu(ui: GameUI) -> tuple[str, str | None]:
             ui.add_system("Starting new game...")
             return ("new", None)
         if choice == "tutorial":
-            show_tutorial(ui)
-            ui.add_system("(Press Enter to return to the menu.)")
-            ui.get_input(allow_empty=True)
-            ui.clear()  # don't leave the tutorial stacked behind the reopened menu
+            show_tutorial(ui)  # modal popup; nothing left in the transcript
             continue
         if choice == "load":
             slot = _choose_save(ui, saves)
@@ -952,7 +1013,11 @@ def game_thread(ui: GameUI):
             if combat_result["result"] == "defeat":
                 _handle_defeat(ui, client, system_prompt, state, hot_context, current_slot)
             else:
+                # Record the dice log first so the aftermath beat can see how it went,
+                # then narrate the close (spoils, consequence) instead of just returning.
                 hot_context.append(f"[Combat] {', '.join(combat_result['log'])}")
+                _handle_combat_aftermath(ui, client, system_prompt, state, hot_context,
+                                         current_slot, combat_result["result"])
             _refresh_ui(ui, state)  # HP/gear may have changed in the fight
 
         # Autosave to the active slot so a crash or close never loses a turn.
@@ -991,6 +1056,21 @@ def new_game(ui: GameUI, client, system_prompt) -> tuple:
     name = name.strip() or "Wanderer"
     ui.add_player_input(name)
 
+    ui.add_system(
+        "Setting — what kind of world is this? In your own words.\n"
+        "e.g. \"grounded low fantasy\", \"rain-soaked cyberpunk dystopia\",\n"
+        "\"post-collapse wasteland\", \"age of sail\". Leave blank for low fantasy."
+    )
+    setting = ui.get_input(allow_empty=True)
+    if not ui.running:
+        return None, None
+    if setting.strip().lower() in ("quit", "exit"):
+        ui.running = False
+        return None, None
+    setting = setting.strip()
+    if setting:
+        ui.add_player_input(setting)
+
     ui.add_system("Background (leave blank to randomize):")
     background = ui.get_input(allow_empty=True)
     if not ui.running:
@@ -1016,7 +1096,7 @@ def new_game(ui: GameUI, client, system_prompt) -> tuple:
     tone = tone.strip() or "no preference — use your strongest, most fitting voice"
     ui.add_player_input(tone)
 
-    player = PlayerCharacter(name=name, background=background, tone=tone)
+    player = PlayerCharacter(name=name, background=background, tone=tone, setting=setting)
     state = EngineState(player=player)
     hot_context = []
 

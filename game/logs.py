@@ -183,7 +183,8 @@ def _state_to_dict(state: EngineState, hot_context: list[str]) -> dict:
         "player": {
             "name": state.player.name,
             "background": state.player.background,
-            "tone": state.player.tone
+            "tone": state.player.tone,
+            "setting": state.player.setting,
         },
         "location": state.location,
         "time_of_day": state.time_of_day,
@@ -337,7 +338,8 @@ def load_game(slot: str = "autosave") -> tuple[EngineState, list[str]] | None:
         player = PlayerCharacter(
             name=data["player"]["name"],
             background=data["player"]["background"],
-            tone=data["player"]["tone"]
+            tone=data["player"]["tone"],
+            setting=data["player"].get("setting", ""),  # old saves predate settings
         )
 
         weapons = [

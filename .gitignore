@@ -11,3 +11,13 @@ theorycrafting.txt
 implementation_details.md
 changelog.md
 TODO.md
+
+# CLI-only session recorder + its artifacts (testing tool, never shipped)
+tests/playthrough.py
+tests/transcripts/
+tests/.gamelogs/
+tests/.session_state.pkl
+tests/.session_hot.json
+tests/.session_meta.json
+# stress-test inputs (gitignored)
+tests/inputs/

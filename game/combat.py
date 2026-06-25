@@ -15,18 +15,22 @@ def _hit_tier(damage: int, target_max_hp: int) -> str:
     return "brutal"
 
 
+# Flavor lines are kept weapon- and setting-agnostic on purpose: the same pools read
+# right whether the player is swinging a sword, firing a pipe-rifle, or throwing a
+# punch. The LLM handles the weapon-specific color in the trigger and aftermath beats;
+# these just narrate the dice with momentum, so they must not assume blades or armor.
 _PLAYER_HIT = {
-    "glancing": ["You nick {name}", "You catch {name} with the edge", "You score a shallow cut across {name}"],
-    "solid": ["You land a solid blow on {name}", "Your strike sinks into {name}", "You open {name} up"],
-    "brutal": ["You hammer {name} with everything you have", "Your blade tears deep into {name}", "You crack {name} hard enough to stagger them"],
+    "glancing": ["You catch {name} a glancing hit", "You graze {name}", "You clip {name}"],
+    "solid": ["You land a solid hit on {name}", "You hit {name} square", "You drive {name} back a step"],
+    "brutal": ["You hammer {name} with everything you have", "You hit {name} dead-on", "You crack {name} hard enough to stagger them"],
 }
 _ENEMY_HIT = {
-    "glancing": ["{name} grazes you", "{name} clips you", "{name}'s blow skids across your guard"],
-    "solid": ["{name} catches you square", "{name} drives a blow home", "{name} lands a hard hit"],
+    "glancing": ["{name} grazes you", "{name} clips you", "{name} catches you a glancing hit"],
+    "solid": ["{name} catches you square", "{name} drives a hit home", "{name} lands a hard one"],
     "brutal": ["{name} smashes into you", "{name} rocks you to the heels", "{name} hits you like a falling beam"],
 }
-_PLAYER_MISS = ["Your swing glances off {name}'s armor.", "{name} turns your blade aside.", "Your blow skids off {name} without biting."]
-_ENEMY_MISS = ["{name}'s blow rings off your armor.", "You take {name}'s hit on your guard.", "{name} strikes, but the armor holds."]
+_PLAYER_MISS = ["{name} slips aside and you come up short.", "You miss {name} clean.", "Your hit goes wide of {name}."]
+_ENEMY_MISS = ["{name} comes at you and misses.", "You ride {name}'s hit and it glances off.", "{name} swings on you wide."]
 _KILL = ["{name} drops and stays down.", "{name} folds and doesn't rise.", "{name} goes down hard."]
 
 

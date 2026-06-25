@@ -4,8 +4,10 @@ One of these notes is injected each turn for the kind of beat the player just
 triggered. It tells you how to run THIS moment — shape, length, focus — and gives
 one example of the standard to hit. The VOICE and rules in the system prompt still
 hold underneath it; write the example's *style* in the player's chosen tone, not the
-tone shown here. If the note doesn't fit what the player actually did, trust the
-moment over the note.
+tone shown here. The examples are fantasy-flavored to show the *shape* of a beat, not
+the setting — translate the technique into the player's world (the "market" example is
+how to paint an arrival, whether the player walks into a bazaar or a neon night-market).
+If the note doesn't fit what the player actually did, trust the moment over the note.
 
 Across every beat, run it like a good table:
 - Give handles, not walls. Name things the player can act on, not just scenery.
@@ -22,7 +24,11 @@ A gorgeous opening in the wrong voice is a failure.
 Open ON THE PLAYER — in their body, mid-moment, already doing or wanting or
 reacting to something — before any scenery. They are a person standing in a world,
 not a camera panning a fog report. A sentence of place is plenty before they're in
-it. Three to four short paragraphs, no more. Two or three sharp sensory cues, never
+it. Three to four short paragraphs, no more.
+Begin the very first line with "You find yourself" and land it in a concrete, active
+moment in a NAMED place — "You find yourself knee-deep in the Mire's cold water,
+hauling a net that isn't yours" — so the player knows where they stand from the first
+breath. (If the chosen tone makes that opener wrong, open in voice instead.) Two or three sharp sensory cues, never
 a catalogue. Let their background color what they notice and what they carry (set
 fitting starting gear). Don't narrate their past, and keep the player's body in one
 coherent position from sentence to sentence (don't have them walking and kneeling in
@@ -47,6 +53,8 @@ animals, what's moving), far (edges, horizon, where the roads run, what's coming
 Lead with two or three senses, not sight alone. Name a few things the player can
 walk up to and touch. Show wear and history; land one detail that's a little off;
 telegraph at least one way out and any obvious danger. End on something moving.
+Give the place a proper name and use it in the prose (coin one that fits the world),
+so it lands on the map and the player can find it again.
 Set location, location_is_new, location_type, location_summary, from_direction.
 
 Example
@@ -82,7 +90,10 @@ line that wasn't there when you came in."
 ## orientation
 A quick fix on where they stand — "where am I", the exits, which way out. Two or
 three sentences, under 60 words. Just the useful facts: where they are, what's
-around, the ways out. This is NOT a description — no history, no atmosphere, no
+around, the ways out. NAME them — the spot they're standing, the settlement or region
+around it, and where each way out leads (use CONNECTIONS FROM HERE from engine state;
+coin and commit a name for anything still nameless). A name they can latch onto beats
+a vague "the town." This is NOT a description — no history, no atmosphere, no
 painting the light. A guide pointing, not a storyteller settling in.
 
 Example
@@ -109,7 +120,9 @@ Let the NPC talk back in THEIR voice, not yours — lean on their card and voice
 engine state, and keep their grudges and what they know consistent with the record.
 Give every NPC a want and one vivid trait, and let information come out through
 character, not narration. Minimal description between lines; don't redescribe the
-room mid-conversation. They don't say everything, and they remember the player.
+room mid-conversation. Keep it short — an NPC says its piece in two or three beats,
+not a speech; let the player draw the rest out instead of dumping it all at once.
+They don't say everything, and they remember the player.
 Subtext over exposition. The player authors only their own words — never put words
 in their mouth or decide what they feel.
 
@@ -243,6 +256,26 @@ wrist with wet rope, your sword gone from its sheath, your purse with it. Two of
 men who beat you ride up front, not bothering to look back — they've done this often
 enough to know you won't be going anywhere. Through the slats, the marsh road unrolls
 behind you, and somewhere past it, the town you'll likely never see again."
+
+## aftermath
+The fight is over and the player came out on top (or broke off and got clear). Open
+on the quiet after — what's left standing, the body, the breath going level — never
+replay the blow-by-blow the dice already showed. One short paragraph, 50–90 words.
+If the beaten enemy would carry something (coin, a blade, a key, a token), award it
+now in inventory state changes — a won fight leaves spoils, and an empty win feels
+hollow; don't gift gear far above what such a foe would have. If the outcome changed
+the place or matters later (a guard dead, a beast cleared from the road, a creature's
+charm freed), record a world fact. If they fled, show what running cost — ground
+given up, a fresh hurt, something dropped. End on the world: settling dust, a door no
+longer guarded, the way ahead.
+
+Example
+Input: "[The fight is over — you came out on top. Narrate the aftermath and any spoils.]"
+"The last raider folds into the ditchwater and stops moving. Your arms are shaking and
+the rain has found its way down your collar, but you're standing and they're not. The
+one who came at you first carried a short knife worth keeping and a purse with nine
+copper, still warm from his belt. Down the road the toppled cart sits where they left
+it, ox gone, one wheel turning slow in the wind."
 
 ## item
 The player is using something from their pack out in the world (a torch, a key, a

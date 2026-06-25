@@ -73,6 +73,25 @@ class NPCRecord:
     facts: list[str] = field(default_factory=list)
     last_seen_turn: int = 0
 
+    @property
+    def label(self) -> str:
+        """A human-readable handle: the real name if known, else the id with its
+        hyphens spaced out — so a still-unnamed NPC shows 'ledger keeper apron
+        man', never the raw 'ledger-keeper-apron-man' slug."""
+        return self.name or self.id.replace("-", " ")
+
+
+def _clean_npc_name(name: str | None, npc_id: str) -> str:
+    """A real display name, or "" when the model handed back the id slug instead
+    of a name (a recurring small-model slip). A genuine name carries a capital or
+    a space; an id slug is lowercase-and-hyphenated, or just the id verbatim."""
+    n = (name or "").strip()
+    if not n or n == npc_id:
+        return ""
+    if n == n.lower() and "-" in n:
+        return ""
+    return n
+
 
 @dataclass
 class WorldFact:
@@ -88,6 +107,7 @@ class PlayerCharacter:
     name: str
     background: str
     tone: str
+    setting: str = ""  # the world/genre this story lives in; blank = grounded low fantasy
 
 
 @dataclass
@@ -116,6 +136,7 @@ class EngineState:
     last_chronicle_turn: int = 0  # turn the last journal chapter was triggered at
     last_world_tick_turn: int = 0  # turn the last offscreen world tick was triggered at
     session_turn: int = 0
+    turns_in_location: int = 0  # consecutive turns spent in the current place
     active_npc: str | None = None  # id of the NPC currently in focus
     npc_idle_turns: int = 0
 
@@ -129,6 +150,12 @@ class EngineState:
         self.time_of_day = (self.time_of_day + increments.get(action_type, 0.0)) % 24.0
 
     def apply_state_changes(self, changes):
+        # Track how long the player's been parked in one place, so the loop-breaker
+        # can fire when a scene starts to stagnate. A genuine move resets it.
+        if changes.location and changes.location != self.location:
+            self.turns_in_location = 1
+        else:
+            self.turns_in_location += 1
         if changes.location:
             prev_location = self.location
             self.location = changes.location
@@ -185,10 +212,11 @@ class EngineState:
         for upd in changes.npcs:
             rec = self.npcs.get(upd.id)
             if rec is None:
-                rec = NPCRecord(id=upd.id, name=upd.name or upd.id)
+                rec = NPCRecord(id=upd.id, name=_clean_npc_name(upd.name, upd.id))
                 self.npcs[upd.id] = rec
-            if upd.name:
-                rec.name = upd.name
+            clean_name = _clean_npc_name(upd.name, upd.id)
+            if clean_name:
+                rec.name = clean_name
             if upd.role:
                 rec.role = upd.role
             if upd.location is not None:
@@ -349,7 +377,7 @@ class EngineState:
 
     def _active_npc_name(self) -> str:
         if self.active_npc and self.active_npc in self.npcs:
-            return self.npcs[self.active_npc].name
+            return self.npcs[self.active_npc].label
         return "none"
 
     def _quests_string(self) -> str:
@@ -367,6 +395,7 @@ class EngineState:
     def to_prompt_string(self) -> str:
         time_label = self._time_label()
         return f"""PLAYER: {self.player.name} | {self.player.background}
+WORLD / SETTING: {self.player.setting or "default — grounded low-to-mid fantasy"}
 LOCATION: {self.location}
 ACTIVE NPC: {self._active_npc_name()}
 TIME: {time_label}

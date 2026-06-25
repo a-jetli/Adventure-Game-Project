@@ -53,10 +53,13 @@ def load_situation(situation: str) -> str | None:
 # call; the model still adapts if the guess is off. Matched on word boundaries so
 # "move" doesn't fire on "remove" or "up" on "pick up".
 _BEAT_CUES = [
-    ("orientation", ("where am i", "where are we", "which way", "exits",
-                     "how do i get there", "where can i go")),
+    ("orientation", ("where am i", "where are we", "which way", "which ways",
+                     "exits", "ways out", "how do i get there", "where can i go",
+                     "where do i go")),
     ("survey", ("look around", "looks around", "look about", "what do i see",
                 "what can i see", "describe", "surroundings", "survey",
+                "long look", "slow look", "good look", "take it all in",
+                "take in the", "look the place over", "get my bearings",
                 "what is here", "whats here", "what's here")),
     ("trade", ("buy", "sell", "purchase", "haggle", "barter", "how much",
                "trade for", "what will you give", "browse the wares", "for sale")),
@@ -71,9 +74,9 @@ _BEAT_CUES = [
     ("rest", ("rest", "sleep", "camp", "make camp", "nap", "bed down", "take watch",
               "wait", "pass the time", "doze")),
     ("action", ("attack", "fight", "hit", "swing", "strike", "stab", "slash",
-                "shoot", "kill", "punch", "kick", "charge", "lunge", "shove",
-                "tackle", "throw", "chase", "flee", "dodge", "parry", "ambush",
-                "block", "confront", "square up", "rush")),
+                "shoot", "fire", "kill", "punch", "kick", "charge", "lunge", "shove",
+                "tackle", "throw", "hurl", "sling", "lob", "chase", "flee",
+                "dodge", "parry", "ambush", "block", "confront", "square up", "rush")),
     ("travel", ("journey", "set out", "set off", "travel to", "ride to",
                 "make my way to", "march to", "head for")),
     ("movement", ("go", "walk", "head", "travel", "enter", "leave", "climb",
@@ -81,6 +84,76 @@ _BEAT_CUES = [
                   "upstairs", "downstairs", "toward", "return", "make for",
                   "make my way", "head out", "head over", "press on", "move to",
                   "move toward", "step out", "step into", "wander")),
+]
+
+
+# Commissive language — the player binding themselves to a future course (accepting a
+# task, striking a deal, swearing an oath). Grammar carries most of it: "I'll …", "I'm
+# going to …", "I swear …" are commitments by construction, whatever verb follows, so we
+# match the construction instead of enumerating verbs (that's why an earlier verb list
+# missed "I'll run the job"). A few explicit acceptances cover the rest. When one fires
+# we drop a one-line reminder by the player's input so the model considers a quest; it
+# still judges whether the goal is multi-turn, so a stray match just costs a nudge it
+# can ignore — we lean inclusive rather than miss the turn a goal is taken on.
+_COMMITMENT_RE = [
+    re.compile(r"\bi['’]ll\b"),                                  # I'll <anything>
+    re.compile(r"\bi (?:will|intend to|mean to|aim to|swear|promise|vow|pledge)\b"),
+    re.compile(r"\bi['’]?m (?:going to|gonna)\b"),               # I'm going to / gonna
+    re.compile(r"\b(?:i accept|i agree|agreed|count me in|i['’]?m in|it['’]?s a deal|"
+               r"that['’]?s the deal|you have a deal|you['’]?ve got a deal|"
+               r"consider it done|you have my word|i give you my word)\b"),
+    re.compile(r"\bmy (?:job|road|task|fight) now\b"),
+]
+
+
+def looks_like_commitment(player_input: str) -> bool:
+    """True when the player's words sound like taking on a goal — a commissive ("I'll
+    …", "I'm going to …", "I swear") or an explicit acceptance ("it's a deal"). Used
+    only to nudge quest creation; the model still decides if it's quest-worthy."""
+    text = player_input.lower()
+    return any(p.search(text) for p in _COMMITMENT_RE)
+
+
+# Player attempts to AUTHOR the world — assert an ally, a contact, a shared past, a
+# power, or gear into being ("my crew slips in", "she's my old handler", "the favor he
+# owes me", "I unleash my fire", "the vial I always keep"). The player only authors
+# their character; the world is the DM's. A small model follows that for items (it can
+# check inventory) but slips for people/powers, so we flag the wording and remind it.
+# Lean inclusive — a stray fire just costs a reminder the model ignores when the thing
+# is genuinely on record.
+_AUTHORING_RE = [
+    re.compile(r"\bmy (crew|men|gang|guild|allies|backup|people|contacts?|"
+               r"friends?|partner|companions?|associates?|handler|mentor|boss)\b"),
+    re.compile(r"\bmy (?:old|former|longtime|trusted|secret|childhood) \w+\b"),
+    re.compile(r"\b(owes? me|i'?m secretly|we go back|remembers? me\b|"
+               r"the favou?r (?:he|she|they|you).{0,12}owe)"),
+    re.compile(r"\bi (?:always (?:carry|keep)|happen to have|conjure|summon|"
+               r"cast|channel|unleash|invoke)\b"),
+    re.compile(r"\bthe \w+ i (?:always )?(?:keep|carry|stash)\b"),
+]
+
+
+def looks_like_authoring(player_input: str) -> bool:
+    """True when the player's wording asserts an ally, contact, past, power, or piece
+    of gear into existence. Used only to nudge a reality-check; the model still judges
+    whether the thing is already established (then it's fine) or not (then deny it)."""
+    text = player_input.lower()
+    return any(p.search(text) for p in _AUTHORING_RE)
+
+
+def _cue_pattern(cue: str) -> str:
+    """Regex for a beat cue. A single-word verb cue also matches its common
+    inflections (fire/fires/fired, rush/rushes/rushing) so a typed-out synonym
+    doesn't slip the net; multi-word cues ("look around") match verbatim."""
+    if " " in cue:
+        return rf"\b{re.escape(cue)}\b"
+    return rf"\b{re.escape(cue)}(?:s|es|ed|ing|d)?\b"
+
+
+# Precompiled once: matching runs every turn, so don't rebuild ~150 regexes each call.
+_BEAT_MATCHERS = [
+    (situation, [re.compile(_cue_pattern(c)) for c in cues])
+    for situation, cues in _BEAT_CUES
 ]
 
 
@@ -93,12 +166,15 @@ def classify_situation(player_input: str, state: EngineState, is_opening: bool =
     # room — neutralize the idiom so the bare "search" cue can't hijack the turn
     # into a "lead with the find" beat when the player is actually leaving.
     text = text.replace("in search of", "toward")
+    # A "hide" or "tail" behind an article/possessive is the NOUN (an animal skin,
+    # a creature's tail) — neutralize it so it can't fire the stealth verb cue, the
+    # way "pocket the hide" was misread as sneaking.
+    text = re.sub(r"\b(the|a|an|my|your|his|her|its|their) (hide|tail)\b", r"\1 thing", text)
     if '"' in player_input:  # quoted speech is a strong dialogue signal
         return "dialogue"
-    for situation, cues in _BEAT_CUES:
-        for cue in cues:
-            if re.search(rf"\b{re.escape(cue)}\b", text):
-                return situation
+    for situation, patterns in _BEAT_MATCHERS:
+        if any(p.search(text) for p in patterns):
+            return situation
     return "small"
 
 
@@ -119,13 +195,32 @@ def normalize_prose(text: str) -> str:
     return text
 
 
-def load_template(category: str, key: str) -> str | None:
-    """Read an editable blueprint at templates/<category>/<key>.md. Returns None
-    when there's no matching template, so injection is always optional."""
+def _setting_pack(setting: str) -> str | None:
+    """Which templates/<pack>/ folder a setting draws blueprints from, or None when it
+    has no pack. Blank / "default" / anything fantasy-flavored uses the built-in
+    `fantasy` pack (preserving the original game). A named setting uses its own pack if
+    one has been authored (templates/<slug>/); otherwise None — better to inject no
+    blueprint than a fantasy one into, say, a cyberpunk story."""
+    s = (setting or "").strip().lower()
+    if not s or s.startswith("default") or "fantas" in s:
+        return "fantasy"
+    slug = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    if slug and os.path.isdir(os.path.join(TEMPLATES_DIR, slug)):
+        return slug
+    return None
+
+
+def load_template(category: str, key: str, setting: str = "") -> str | None:
+    """Read an editable blueprint at templates/<pack>/<category>/<key>.md, where the
+    pack is chosen by the active setting (default: fantasy). Returns None when there's
+    no matching template or the setting has no pack, so injection is always optional."""
     if not key:
         return None
+    pack = _setting_pack(setting)
+    if not pack:
+        return None
     filename = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_") + ".md"
-    filepath = os.path.join(TEMPLATES_DIR, category, filename)
+    filepath = os.path.join(TEMPLATES_DIR, pack, category, filename)
     if os.path.exists(filepath):
         with open(filepath, "r") as f:
             return f.read().strip()
@@ -151,7 +246,7 @@ def _named_npc_ids(player_input: str, npcs: dict[str, NPCRecord]) -> list[str]:
 
 
 def _npc_card(rec: NPCRecord) -> str:
-    lines = [f"{rec.name} (id: {rec.id}) [{rec.role or 'unknown role'}] — disposition {rec.disposition}, last seen turn {rec.last_seen_turn}"]
+    lines = [f"{rec.label} (id: {rec.id}) [{rec.role or 'unknown role'}] — disposition {rec.disposition}, last seen turn {rec.last_seen_turn}"]
     if rec.location:
         lines.append(f"  whereabouts: {rec.location}")
     if rec.description:
@@ -211,8 +306,8 @@ def recall_memories(state: EngineState, player_input: str,
         notes.append((label, f.text, set(_content_tokens(f.text))))
     for rec in state.npcs.values():
         for fact in rec.facts:
-            body = f"{rec.name}: {fact}"
-            notes.append((f"about {rec.name}", body, set(_content_tokens(body))))
+            body = f"{rec.label}: {fact}"
+            notes.append((f"about {rec.label}", body, set(_content_tokens(body))))
 
     if not notes:
         return []
@@ -271,7 +366,7 @@ def build_retrieval_context(state: EngineState, player_input: str) -> str:
         lines = []
         for rec in roster:
             latest = f"; {rec.facts[-1]}" if rec.facts else ""
-            lines.append(f"- {rec.name} (id: {rec.id}) [{rec.role or 'unknown role'}] (disposition {rec.disposition}{latest})")
+            lines.append(f"- {rec.label} (id: {rec.id}) [{rec.role or 'unknown role'}] (disposition {rec.disposition}{latest})")
         blocks.append("PEOPLE HERE (present at this location):\n" + "\n".join(lines))
 
     # NPC CARD(S) — deep recall for whoever is in focus or named this turn.
@@ -292,7 +387,7 @@ def build_retrieval_context(state: EngineState, player_input: str) -> str:
         prose = load_npc(npc_id)
         if prose:
             card += f"\n  history:\n{prose}"
-        blocks.append(f"NPC CARD — {rec.name}:\n{card}")
+        blocks.append(f"NPC CARD — {rec.label}:\n{card}")
 
     facts = state.relevant_world_facts(state.location)
     if facts:
@@ -310,12 +405,13 @@ def build_retrieval_context(state: EngineState, player_input: str) -> str:
     # Editable blueprints, injected by tag. The engine only knows a location's
     # type and an NPC's role from a previous turn, so first arrivals/meetings
     # fall back to the prompt's baseline guidance.
+    setting = state.player.setting
     loc_type = state.location_types.get(state.location)
-    loc_tmpl = load_template("locations", loc_type) if loc_type else None
+    loc_tmpl = load_template("locations", loc_type, setting) if loc_type else None
     if loc_tmpl:
         blocks.append(f"LOCATION BLUEPRINT ({loc_type}) — follow this when describing the place:\n{loc_tmpl}")
     for role in roles:
-        dlg_tmpl = load_template("dialogue", role)
+        dlg_tmpl = load_template("dialogue", role, setting)
         if dlg_tmpl:
             blocks.append(f"DIALOGUE BLUEPRINT ({role}) — follow this in their dialogue:\n{dlg_tmpl}")
 
@@ -374,16 +470,21 @@ def handle_local_command(cmd: str, state: EngineState):
     if word == "use":
         item_name = cmd[len("use"):].strip()
         match = next((c for c in state.consumables if c.name.lower() == item_name.lower()), None)
-        if match is None:
-            return f"'{item_name}' isn't something you can use."
-        # Mechanical effects (heal/harm/maxhp/buff) resolve locally, no API call.
-        result = state.apply_consumable_effect(match)
-        if result is not None:
-            state.consumables.remove(match)
-            return result
-        # Narrative-only item: let the loop play it as a real turn so the LLM
-        # narrates the effect (and decides whether it's consumed).
-        return PLAY_AS_ACTION
+        if match is not None:
+            # Mechanical effects (heal/harm/maxhp/buff) resolve locally, no API call.
+            result = state.apply_consumable_effect(match)
+            if result is not None:
+                state.consumables.remove(match)
+                return result
+            # Narrative-only consumable: play it as a real turn so the LLM narrates
+            # the effect (and decides whether it's consumed).
+            return PLAY_AS_ACTION
+        # Not a consumable — a trinket (a charm, a key, a horn) used out in the world
+        # has no engine effect, so it also falls through to a narrated turn rather
+        # than dead-ending. Anything not actually carried is rejected.
+        if any(t.name.lower() == item_name.lower() for t in state.trinkets):
+            return PLAY_AS_ACTION
+        return f"'{item_name}' isn't something you can use."
 
     return None
 
@@ -464,7 +565,7 @@ def format_npc_directory(state: EngineState) -> str:
     for rec in sorted(state.npcs.values(), key=lambda r: -r.last_seen_turn):
         role = f", {rec.role}" if rec.role else ""
         where = f" — at {rec.location}" if rec.location else ""
-        lines.append(f"  {rec.name} ({_disposition_word(rec.disposition)}{role}){where}")
+        lines.append(f"  {rec.label} ({_disposition_word(rec.disposition)}{role}){where}")
         if rec.facts:
             lines.append(f"      {rec.facts[-1]}")
     return "\n".join(lines)
@@ -553,6 +654,34 @@ def call_llm(client, system_prompt, state, hot_context, player_input, model=MODE
         if arrival_note:
             note_block += ("\nIF THIS MOVE OPENS ONTO SOMEWHERE NEW, run it as an arrival "
                            f"instead of a quick move:\n{arrival_note}\n")
+    # The moment the player commits to something is the one a small model most often
+    # forgets to record as a quest — nudge it right here, where attention is highest.
+    if looks_like_commitment(player_input):
+        note_block += ("\nThe player may be committing to a goal this turn. If it's an "
+                       "objective that runs past this turn — a deal struck, a task taken "
+                       "on, a hunt begun — open it with quest_added (don't for a one-off "
+                       "action).\n")
+    # The player only authors their character — not allies, contacts, history, powers,
+    # or gear. A small model denies conjured ITEMS (it can check inventory) but tends to
+    # play along when the player asserts a crew, an old friend, or a spell into being.
+    # This nudge lands right where attention is highest.
+    if looks_like_authoring(player_input):
+        note_block += ("\nREALITY CHECK: the player may be asserting something into the "
+                       "world — an ally or crew, a contact, a shared past, a power, or a "
+                       "piece of gear. If engine state and the retrieved logs don't already "
+                       "establish it, it ISN'T true: deny it inside the fiction (the empty "
+                       "alley, the stranger's blank look, the spell that gutters, the empty "
+                       "pocket). Don't scold — then point at a real way they could earn it. "
+                       "Any genuine edge here still costs something.\n")
+    # When the player's been parked in one place for several turns, a small model
+    # starts looping — re-raising a hook they've passed on, re-painting the same
+    # scene. Break it AND lean out, since the place is already established.
+    if situation != "opening" and state.turns_in_location >= 3:
+        note_block += ("\nKEEP IT MOVING: you've been in this place several turns. Don't "
+                       "re-raise a hook the player has already passed on, and don't re-paint "
+                       "what's established or reuse an image or sentence shape from this scene "
+                       "— go leaner, open on a different detail, and push something genuinely "
+                       "new into the moment.\n")
     tone = state.player.tone.strip() if state.player.tone else "the character's own plain, honest voice"
 
     # This closing line is the very last thing the model reads before it writes, so
@@ -576,7 +705,8 @@ PLAYER INPUT:
 
 Now write your reply as a {situation} beat, in this exact voice: {tone}. Keep it
 tight; don't reach for a clever line, and don't reuse an image or phrase you've
-already leaned on this scene."""
+already leaned on this scene. Vary your rhythm and your endings — not every beat
+needs an ominous image or a portentous closer; let some land plain and stop."""
 
     t_start = time.time()
     failure_type = None
