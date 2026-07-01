@@ -21,7 +21,7 @@ The pygame client in `legacy/` also needs `pygame`, but only if you want to run 
 ```bash
 git clone https://github.com/a-jetli/Adventure-Game-Project.git
 cd Adventure-Game-Project
-pip install textual pydantic python-dotenv openai
+pip install -r requirements.txt
 python3 game_tui.py
 ```
 

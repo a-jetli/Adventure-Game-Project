@@ -25,3 +25,6 @@ tests/inputs/
 
 # retired pygame front-end (moved out of the tracked tree during the Textual port)
 legacy/
+
+# internal Textual-port checklist, not for the repo
+TODO_TEXTUAL_PORT.md

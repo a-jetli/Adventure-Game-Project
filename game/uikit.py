@@ -2,12 +2,12 @@
 
 This module deliberately imports **no** UI toolkit (no pygame, no textual) so the
 game driver (`game/driver.py`) and the Textual UI can both depend on it without
-dragging pygame in. The pygame `GameUI` (`game/ui.py`) and the future
-`TextualGameUI` (`game/tui.py`) each implement `GameUIProtocol`.
+dragging pygame in. The Textual `TextualGameUI` (`game/tui.py`) and the retired
+pygame `GameUI` (`legacy/ui.py`) each implement `GameUIProtocol`.
 
-`PAUSE_SENTINEL` lives here (rather than in the pygame `game/ui.py`) for the same
+`PAUSE_SENTINEL` lives here (rather than in the pygame `legacy/ui.py`) for the same
 reason — the driver compares against it every turn, and the Textual side must be
-able to import it without importing pygame. `game/ui.py` re-exports it for
+able to import it without importing pygame. `legacy/ui.py` re-exports it for
 backward compatibility.
 """
 

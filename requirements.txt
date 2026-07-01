@@ -1,0 +1,6 @@
+# The Game — Python dependencies. Install with: pip install -r requirements.txt
+textual
+pydantic
+python-dotenv
+openai
+# pygame is only needed for the retired client in legacy/; install it separately if wanted.

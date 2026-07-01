@@ -2,12 +2,13 @@
 
 `game_thread(ui)` and every helper here talk to the UI only through the
 `GameUIProtocol` contract (`game/uikit.py`), so this module imports **no** UI
-toolkit and can be reused verbatim by any front-end. The pygame entry point
-(`game_ui.py`) and the Textual entry (`game_tui.py`, later) both build a concrete
-UI and hand it to `game_thread`.
+toolkit and can be reused verbatim by any front-end. The Textual entry
+(`game_tui.py`) and the retired pygame entry (`legacy/game_ui.py`) both build a
+concrete UI and hand it to `game_thread`.
 
-Extracted from `game_ui.py` in the Textual port (Stage 2). The only pygame-aware
-code left in `game_ui.py` is `main()` (window + 60-FPS loop).
+Extracted from the old `game_ui.py` in the Textual port; the pygame client now
+lives in `legacy/`, where `legacy/game_ui.py:main()` holds the only pygame-aware
+code (window + 60-FPS loop).
 """
 
 import os
@@ -119,8 +120,9 @@ def _known_places(state: EngineState) -> list[str]:
 
 
 def _entity_info_for_ui(state: EngineState) -> dict[str, str]:
-    """Hover-tooltip text for the highlighted words in the narrative, drawn from
-    live engine state — who someone is, where a place connects, what an item is."""
+    """Detail text for the highlighted entities, drawn from live engine state — who
+    someone is, where a place connects, what an item is. The pygame UI shows it as a
+    hover tooltip; the Textual UI shows it in the Inspect card."""
     info: dict[str, str] = {}
 
     if state.player.name:
@@ -175,8 +177,9 @@ def _entity_info_for_ui(state: EngineState) -> dict[str, str]:
 
 
 def _refresh_ui(ui: GameUIProtocol, state: EngineState):
-    """Push current engine state into the highlight context, hover tooltips, and
-    the persistent status bar. Called whenever state changes."""
+    """Push current engine state into the highlight context, the entity detail
+    (a hover tooltip in pygame, the Inspect card in Textual), and the persistent
+    status bar. Called whenever state changes."""
     ui.set_context(
         state.player.name,
         _known_places(state),
@@ -319,7 +322,8 @@ COMMANDS_HELP = (
     "  /use [item] · /equip [item]\n"
     "Other:\n"
     "  /tutorial · /journal · /export · /settings · /theme · /help · /quit\n"
-    "Hover a highlighted word for detail. Space skips the typewriter; scroll to read\n"
+    "Names, places and items are colour-coded — pick one from the Inspect card in the\n"
+    "sidebar to read what it is. Press any key to skip the typewriter; scroll to read\n"
     "back. Esc pauses / backs out of menus."
 )
 
@@ -339,10 +343,12 @@ TUTORIAL_PAGES = [
     ("Reading the screen", (
         "Top bar: your HP, where you are, the time of day, and your equipped weapon and\n"
         "armor — always visible.\n"
-        "Highlighted words are things the world is tracking — people, places, items,\n"
-        "and more, each its own colour. Hover one with the mouse to see what it is.\n"
-        "Text types itself in; press Space or Enter to skip to the end. Scroll up with\n"
-        "the mouse wheel to re-read anything."
+        "The right sidebar has cards for the world, an Inspect list, your quests, and\n"
+        "the commands. Highlighted words are things the world is tracking — people,\n"
+        "places, items, and more, each its own colour; pick one from the Inspect card\n"
+        "to read what it is.\n"
+        "Text types itself in; press any key to skip to the end. Scroll up to re-read\n"
+        "anything."
     )),
     ("Quick read-outs (instant — they don't cost a turn)", (
         "  /inventory  what you're carrying      /map        places you've been + links\n"
@@ -360,8 +366,8 @@ TUTORIAL_PAGES = [
         "recap so you remember where you left off."
     )),
     ("Settings & control", (
-        "Esc pauses the game (Resume / Journal / Settings / Save & quit) and backs you\n"
-        "out of any menu.\n"
+        "Esc pauses the game (Resume / Journal / Settings / Save & main menu /\n"
+        "Save & quit) and backs you out of any menu.\n"
         "  /settings   change the model/provider or the theme\n"
         "  /theme      pick Dark, Light, or Earthy\n"
         "  /help       the short command list      /quit   save and exit\n"

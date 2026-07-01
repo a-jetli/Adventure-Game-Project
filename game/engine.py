@@ -192,7 +192,8 @@ class EngineState:
                     self.location_graph.setdefault(changes.location, {})[opp] = prev_location
 
         # A short gist of the current place — set on arrival, updatable later if
-        # the place materially changes. Powers the location hover tooltip.
+        # the place materially changes. Powers the location detail (hover tooltip
+        # in pygame, Inspect card in Textual).
         if changes.location_summary and self.location and self.location != "unknown":
             self.location_descriptions[self.location] = changes.location_summary.strip()
 

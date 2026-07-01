@@ -1,7 +1,8 @@
 """Textual entry point for The Game (terminal UI).
 
-The parallel of game_ui.py (pygame), reusing the same toolkit-agnostic driver
-(game/driver.py). The app starts the driver on a worker thread itself, so this is
+The parallel of the retired legacy/game_ui.py (pygame), reusing the same
+toolkit-agnostic driver (game/driver.py). The app starts the driver on a worker
+thread itself, so this is
 just: build the app with the configured theme and run it.
 
 Run:  python3 game_tui.py

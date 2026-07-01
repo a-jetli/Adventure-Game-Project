@@ -1,12 +1,12 @@
 """Shared, toolkit-free color data for every front-end.
 
-Lifted verbatim from the pygame `game/ui.py` in the Textual port (Stage 2b) so both
+Lifted verbatim from the pygame UI (now `legacy/ui.py`) in the Textual port so both
 back-ends consume one source of truth. This module imports **no** UI toolkit.
 
-- pygame (`game/ui.py`) does `from game.palette import *` to get these as module
-  globals, then `apply_theme()` swaps them (it keeps living in `game/ui.py` because
+- pygame (`legacy/ui.py`) does `from game.palette import *` to get these as module
+  globals, then `apply_theme()` swaps them (it keeps living in `legacy/ui.py` because
   it mutates that module's globals, which the render code reads at call time).
-- Textual (`game/tui.py`, later) reads `THEMES[name]` directly and maps the role
+- Textual (`game/tui.py`) reads `THEMES[name]` directly and maps the role
   keys (`HIGHLIGHT_*`, `BG_COLOR`, …) to a Textual theme / CSS variables.
 
 Color values are `(r, g, b)` or `(r, g, b, a)` tuples. `THEME_KEYS` lists the
@@ -77,7 +77,7 @@ STATUS_VALUE_COLOR = (184, 190, 197)     # B8BEC5 — secondary-bright values
 STATUS_HP_BG = (30, 32, 37)              # 1B232D — empty portion of the HP bar
 STATUS_HP_FILL = (219, 126, 119)         # DB7E77 — filled portion (dusty salmon)
 
-# ── hover tooltip (elaborates a highlighted word) ─────────────────────────────
+# ── entity detail: pygame hover tooltip / Textual Inspect card ────────────────
 TOOLTIP_BG = (20, 21, 24, 248)           # 141518
 TOOLTIP_BORDER = (60, 62, 68)            # 39424E
 TOOLTIP_TITLE_COLOR = (211, 155, 87)     # D39B57 brass
@@ -88,7 +88,7 @@ PARAGRAPH_GAP = 10
 
 # ── themes ────────────────────────────────────────────────────────────────────
 # Every colour above is the "dark" theme. A theme is just a dict of overrides for
-# these names; apply_theme() (in game/ui.py) swaps the module globals, and because
+# these names; apply_theme() (in legacy/ui.py) swaps the module globals, and because
 # every render call reads the names at call-time, the whole UI recolours with no
 # other change.
 THEME_KEYS = [

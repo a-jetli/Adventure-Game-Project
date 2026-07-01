@@ -3,7 +3,7 @@
 Both back-ends compute the same role-tagged spans over the narrative; only the
 *rendering* differs (pygame blits colored glyphs, Textual builds a Rich `Text`).
 This module is the single source of that pure regex logic, lifted out of the pygame
-`game/ui.py` in the Textual port (Stage 2b). It imports no UI toolkit.
+UI (now `legacy/ui.py`) in the Textual port. It imports no UI toolkit.
 
 `compute_highlight_spans` returns spans in **application order**; callers fill a
 per-position map with first-wins precedence (earlier spans claim a character before

@@ -406,7 +406,7 @@ class GameApp(App):
         self._spinner_i = 0
         # ── universal typewriter: ALL new prose (narrative/system/combat) reveals at a
         #    constant chars-per-second, one block at a time (earliest first) — mirrors
-        #    the pygame UI (`game/ui.py` typewriter_speed). Player echo, panels and the
+        #    the pygame UI (`legacy/ui.py` typewriter_speed). Player echo, panels and the
         #    spinner are instant. A single UI-thread timer drains a reveal queue, so the
         #    pace is identical whether text was streamed or arrived whole. ───────────
         self._reveal_queue: list[_Reveal] = []
