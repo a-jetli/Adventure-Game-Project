@@ -1156,7 +1156,7 @@ def run_eval():
 
     print()
 
-    with open("system_prompt.md", "rb") as f:
+    with open("prompts/system_prompt.md", "rb") as f:
         prompt_hash = hashlib.md5(f.read()).hexdigest()[:8]
 
     results = {

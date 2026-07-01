@@ -4,7 +4,8 @@ import threading
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
-STATS_FILE = "logs/session_stats.json"
+# The stats file path lives under the shared data root (GAME_DATA_DIR-aware); it's
+# read live from game.logs at flush time so per-session isolation applies here too.
 
 
 @dataclass
@@ -79,8 +80,9 @@ class SessionStats:
             return "\n".join(lines)
 
     def flush(self):
+        from game import logs   # lazy: avoids any import cycle; honors GAME_DATA_DIR
         with self.lock:
-            os.makedirs("logs", exist_ok=True)
+            os.makedirs(logs.DATA_DIR, exist_ok=True)
             # Build a plain dict we can write to JSON (leave the lock object out)
             data = {
                 "session_start": self.session_start,
@@ -91,5 +93,5 @@ class SessionStats:
                 "failed_calls": self.failed_calls,
                 "retry_successes": self.retry_successes,
             }
-            with open(STATS_FILE, "w") as f:
+            with open(logs.STATS_FILE, "w") as f:
                 json.dump(data, f, indent=2)

@@ -1,17 +1,29 @@
+"""Toolkit-agnostic game driver — the whole game, minus the screen.
+
+`game_thread(ui)` and every helper here talk to the UI only through the
+`GameUIProtocol` contract (`game/uikit.py`), so this module imports **no** UI
+toolkit and can be reused verbatim by any front-end. The pygame entry point
+(`game_ui.py`) and the Textual entry (`game_tui.py`, later) both build a concrete
+UI and hand it to `game_thread`.
+
+Extracted from `game_ui.py` in the Textual port (Stage 2). The only pygame-aware
+code left in `game_ui.py` is `main()` (window + 60-FPS loop).
+"""
+
 import os
 import queue
 import threading
 import time
-import pygame
 from game import config
 from game.engine import EngineState, PlayerCharacter
 from game.stats import SessionStats
+from game import logs   # for the live data-root paths (GAME_DATA_DIR-aware)
 from game.logs import (
     init_logs, write_world_seed, process_response,
     save_session, save_game, load_game,
     list_saves, delete_save, export_book,
 )
-from game.ui import GameUI, PAUSE_SENTINEL
+from game.uikit import PAUSE_SENTINEL, GameUIProtocol
 from game.combat import CombatInterface, run_combat
 from game.game_logic import (
     handle_local_command, call_llm, update_synopsis, load_system_prompt,
@@ -36,23 +48,24 @@ WORLD_TICK_EVERY = 8
 WORLD_TICK_MIN_GAP = 4
 
 
-DEBUG_LOG = "logs/debug_narrative.txt"
 DEBUG_LOCK = threading.RLock()
 
 
 # ── debug logging ─────────────────────────────────────────────────────────────
+# Path derives from the shared data root (logs.DEBUG_FILE), read live so a per-session
+# GAME_DATA_DIR (web demo) keeps each player's debug log in their own tree.
 
 def _debug_log_clear():
     with DEBUG_LOCK:
-        os.makedirs("logs", exist_ok=True)
-        with open(DEBUG_LOG, "w") as f:
+        os.makedirs(logs.DATA_DIR, exist_ok=True)
+        with open(logs.DEBUG_FILE, "w") as f:
             f.write("")
 
 
 def _debug_log(turn: int, player_input: str, narrative: str):
     with DEBUG_LOCK:
-        os.makedirs(os.path.dirname(DEBUG_LOG), exist_ok=True)
-        with open(DEBUG_LOG, "a") as f:
+        os.makedirs(os.path.dirname(logs.DEBUG_FILE), exist_ok=True)
+        with open(logs.DEBUG_FILE, "a") as f:
             f.write(f"\n--- Turn {turn} ---\n")
             f.write(f"INPUT: {player_input}\n")
             f.write(f"OUTPUT: {narrative}\n")
@@ -161,7 +174,7 @@ def _entity_info_for_ui(state: EngineState) -> dict[str, str]:
     return info
 
 
-def _refresh_ui(ui: GameUI, state: EngineState):
+def _refresh_ui(ui: GameUIProtocol, state: EngineState):
     """Push current engine state into the highlight context, hover tooltips, and
     the persistent status bar. Called whenever state changes."""
     ui.set_context(
@@ -175,6 +188,11 @@ def _refresh_ui(ui: GameUI, state: EngineState):
         state.hp, state.max_hp, state.location, state._time_label(),
         state.equipped_weapon.name, state.equipped_armor.name,
     )
+    # Active objectives for the sidebar journal card (Textual renders it; pygame no-ops).
+    ui.set_quests([
+        (q.title, (q.stages[-1] if q.stages else q.description))
+        for q in state.quests if q.status == "active"
+    ])
 
 
 # ── local commands ────────────────────────────────────────────────────────────
@@ -214,7 +232,7 @@ def _unique_slot(name: str) -> str:
     return f"{base} {n}"
 
 
-def _choose_save(ui: GameUI, saves: list[dict]) -> str | None:
+def _choose_save(ui: GameUIProtocol, saves: list[dict]) -> str | None:
     options = [(_save_label(s), s["slot"]) for s in saves]
     options.append(("Back", "__back__"))
     choice = ui.show_menu("Load game", options, subtitle="Pick a save to continue.")
@@ -223,7 +241,7 @@ def _choose_save(ui: GameUI, saves: list[dict]) -> str | None:
     return choice
 
 
-def _manage_saves(ui: GameUI):
+def _manage_saves(ui: GameUIProtocol):
     while ui.running:
         saves = list_saves()
         if not saves:
@@ -244,7 +262,7 @@ def _manage_saves(ui: GameUI):
             ui.add_system(f"Deleted save '{choice}'.")
 
 
-def run_setup(ui: GameUI, forced: bool = False) -> bool:
+def run_setup(ui: GameUIProtocol, forced: bool = False) -> bool:
     """First-run / settings flow: pick a provider, enter a key, write .env, and
     reload config so it takes effect this session. Returns True if a usable key
     is configured afterward."""
@@ -352,7 +370,7 @@ TUTORIAL_PAGES = [
 ]
 
 
-def show_tutorial(ui: GameUI):
+def show_tutorial(ui: GameUIProtocol):
     """Walk a first-time player through every feature as a modal popup, paged
     with Next / Back, rather than dumping cards into the transcript."""
     i = 0
@@ -380,39 +398,54 @@ def show_tutorial(ui: GameUI):
             break
 
 
-def _theme_picker(ui: GameUI):
-    """Pick a colour theme; applies live and persists to .env."""
-    from game import ui as ui_module
+def _theme_picker(ui: GameUIProtocol):
+    """Pick a colour theme; applies live and persists to .env. Toolkit-free: the
+    palette is shared data and each UI applies the theme its own way via set_theme."""
+    from game import palette
+    current = ui.get_theme_name()
     options = [
-        (ui_module.THEME_LABELS[k] + (" (current)" if k == ui_module.CURRENT_THEME else ""), k)
-        for k in ("dark", "light", "earthy")
+        (palette.THEME_LABELS[k] + (" (current)" if k == current else ""), k)
+        for k in ("dark", "light", "earthy", "cyber")
     ]
     options.append(("Back", "__back__"))
     choice = ui.show_menu("Theme", options, subtitle="Pick a colour theme.")
-    if choice in ui_module.THEMES:
-        ui_module.apply_theme(choice)
+    if choice in palette.THEMES:
+        ui.set_theme(choice)
         ui.rehighlight_all()  # recolour accents on text already on screen
         config.write_env({"UI_THEME": choice})
-        ui.add_system(f"Theme set to {ui_module.THEME_LABELS[choice]}.")
+        ui.add_system(f"Theme set to {palette.THEME_LABELS[choice]}.")
 
 
-def settings_menu(ui: GameUI):
+def settings_menu(ui: GameUIProtocol):
     """In-UI settings: theme and provider/key. Reachable from the opening menu
     or via /settings during play."""
+    supports_daynight = hasattr(ui, "get_daynight")
     while ui.running:
+        options = [("Theme", "theme")]
+        if supports_daynight:
+            state = "on" if ui.get_daynight() else "off"
+            options.append((f"Day/night lighting: {state}", "daynight"))
+        options += [("Provider & API key", "provider"), ("Back", "__back__")]
         choice = ui.show_menu(
-            "Settings",
-            [("Theme", "theme"),
-             ("Provider & API key", "provider"),
-             ("Back", "__back__")],
+            "Settings", options,
             subtitle="Change how the game looks and which model narrates it.",
         )
         if choice in ("__back__", "quit", "exit", "") or not ui.running:
             return
         if choice == "theme":
             _theme_picker(ui)
+        elif choice == "daynight":
+            _daynight_toggle(ui)
         elif choice == "provider":
             run_setup(ui)
+
+
+def _daynight_toggle(ui: GameUIProtocol):
+    """Turn the day/night lighting on or off; applies live and persists to .env."""
+    new_state = not ui.get_daynight()
+    ui.set_daynight(new_state)
+    config.write_env({"UI_DAYNIGHT": "1" if new_state else "0"})
+    ui.add_system(f"Day/night lighting turned {'on' if new_state else 'off'}.")
 
 
 def _journal_story(state: EngineState) -> str:
@@ -423,7 +456,7 @@ def _journal_story(state: EngineState) -> str:
     return state.synopsis.strip() or "It's early yet — your story has barely begun."
 
 
-def journal_menu(ui: GameUI, state: EngineState):
+def journal_menu(ui: GameUIProtocol, state: EngineState):
     """The 'journey so far' — a browsable record of the run. Pick a section and
     it's shown as a card. Reuses the same read-outs as the people/map/chronicle/
     quests commands; the story spine is the running synopsis."""
@@ -454,7 +487,7 @@ def journal_menu(ui: GameUI, state: EngineState):
     ui.add_panel(title, body)
 
 
-def _export_book(ui: GameUI, state: EngineState):
+def _export_book(ui: GameUIProtocol, state: EngineState):
     """Compile the journal into a keepable Markdown book and tell the player where
     it landed. Shared by the journal menu's Export entry and the /export command."""
     try:
@@ -471,7 +504,7 @@ def _export_book(ui: GameUI, state: EngineState):
                       "and it will fill out.)")
 
 
-def _streaming_sink(ui: GameUI):
+def _streaming_sink(ui: GameUIProtocol):
     """Build an on_delta callback that swaps the 'thinking' spinner for live
     narrative on the first streamed token. Returns (on_delta, streamed), where
     streamed[0] flips True once any text has begun streaming — so the caller knows
@@ -488,7 +521,7 @@ def _streaming_sink(ui: GameUI):
     return on_delta, streamed
 
 
-def _handle_defeat(ui: GameUI, client, system_prompt, state, hot_context, current_slot):
+def _handle_defeat(ui: GameUIProtocol, client, system_prompt, state, hot_context, current_slot):
     """Combat defeat is a setback, not a Game Over. The player survives at a sliver
     of HP; the LLM narrates the aftermath (captured, robbed, left for dead) on a
     forced 'defeat' beat, and the cost lands in state through the normal schema.
@@ -528,7 +561,7 @@ def _handle_defeat(ui: GameUI, client, system_prompt, state, hot_context, curren
     save_game(state, hot_context, current_slot)
 
 
-def _handle_combat_aftermath(ui: GameUI, client, system_prompt, state, hot_context,
+def _handle_combat_aftermath(ui: GameUIProtocol, client, system_prompt, state, hot_context,
                              current_slot, result):
     """A won or broken-off fight gets a short closing beat, so victory isn't just a
     dice log handed back: spoils land in inventory, a notable outcome is recorded, and
@@ -570,20 +603,19 @@ def _handle_combat_aftermath(ui: GameUI, client, system_prompt, state, hot_conte
     save_game(state, hot_context, current_slot)
 
 
-def _save_and_quit(ui: GameUI, state, hot_context, current_slot):
+def _save_and_quit(ui: GameUIProtocol, state, hot_context, current_slot):
     """Persist everything and end the session. Shared by typed `quit` and the
-    pause menu's Save & quit."""
-    time.sleep(0.5)
+    pause menu's Save & quit. Sets `ui.running = False`, which both UIs treat as the
+    signal to tear down (the worker loop ends → the app exits) — no extra keypress."""
     save_session(hot_context, state)
     save_game(state, hot_context, current_slot)
     session_stats.flush()
     ui.add_system(session_stats.summary())
-    ui.add_system(f"Saved to '{current_slot}'. Press any key to close.")
-    ui.get_input(allow_empty=True)
+    ui.add_system(f"Saved to '{current_slot}'.")
     ui.running = False
 
 
-def _save_to_menu(ui: GameUI, state, hot_context, current_slot):
+def _save_to_menu(ui: GameUIProtocol, state, hot_context, current_slot):
     """Persist and return to the opening menu without ending the session. Shared
     by the pause menu's Save & main menu."""
     save_session(hot_context, state)
@@ -591,7 +623,7 @@ def _save_to_menu(ui: GameUI, state, hot_context, current_slot):
     session_stats.flush()
 
 
-def pause_menu(ui: GameUI, state: EngineState) -> str:
+def pause_menu(ui: GameUIProtocol, state: EngineState) -> str:
     """Opened by Esc during play. Returns 'resume', 'menu', or 'quit'."""
     while ui.running:
         choice = ui.show_menu(
@@ -617,7 +649,7 @@ def pause_menu(ui: GameUI, state: EngineState) -> str:
     return "resume"
 
 
-def opening_menu(ui: GameUI) -> tuple[str, str | None]:
+def opening_menu(ui: GameUIProtocol) -> tuple[str, str | None]:
     """Returns (mode, slot): ('new', None), ('load', slot), or ('quit', None)."""
     while ui.running:
         saves = list_saves()
@@ -660,7 +692,7 @@ def opening_menu(ui: GameUI) -> tuple[str, str | None]:
 # ── combat ────────────────────────────────────────────────────────────────────
 
 class GUICombatInterface(CombatInterface):
-    def __init__(self, ui: GameUI, enemy_type: str):
+    def __init__(self, ui: GameUIProtocol, enemy_type: str):
         self.ui = ui
         self.enemy_type = enemy_type
 
@@ -694,7 +726,10 @@ class GUICombatInterface(CombatInterface):
             status_lines,
             [("Attack", "attack"), ("Use Item", "item"), ("Flee", "flee")],
         )
-        if not self.ui.running or choice in ("quit", "exit"):
+        # Esc (delivered as "__back__"), quit/exit, or a torn-down UI all read as "flee"
+        # — the safe disengage — so a stray Back never falls through as an invalid action
+        # that silently hands the enemies a free round.
+        if not self.ui.running or choice in ("quit", "exit", "__back__"):
             return "flee"
         return choice
 
@@ -719,7 +754,7 @@ class GUICombatInterface(CombatInterface):
             item_options,
             layout="vertical",
         )
-        if item_choice in ("cancel", "quit", "exit"):
+        if item_choice in ("cancel", "quit", "exit", "__back__"):  # Esc = "__back__"
             return None
 
         try:
@@ -728,7 +763,7 @@ class GUICombatInterface(CombatInterface):
             return None
 
 
-def run_combat_ui(ui: GameUI, state: EngineState, encounter) -> dict:
+def run_combat_ui(ui: GameUIProtocol, state: EngineState, encounter) -> dict:
     ui.add_combat_text(f"═══ COMBAT — {encounter.enemy_type} ═══", animate=True)
     ui.wait_for_text_output()
 
@@ -738,7 +773,7 @@ def run_combat_ui(ui: GameUI, state: EngineState, encounter) -> dict:
 
 # ── game thread ───────────────────────────────────────────────────────────────
 
-def game_thread(ui: GameUI):
+def game_thread(ui: GameUIProtocol):
     init_logs()
     system_prompt = load_system_prompt()
 
@@ -766,15 +801,18 @@ def game_thread(ui: GameUI):
             state, hot_context = loaded
             current_slot = slot
             _refresh_ui(ui, state)
-            ui.add_system(f"Welcome back, {state.player.name}. Turn {state.session_turn}.")
-            ui.add_system(f"Location: {state.location} | HP: {state.hp}/{state.max_hp}")
+            # The resume block is "catching up" context, not live narration — render it
+            # all at once (instant) so the welcome lines, inventory panel and recap don't
+            # half-stream inconsistently.
+            ui.add_system(f"Welcome back, {state.player.name}. Turn {state.session_turn}.", instant=True)
+            ui.add_system(f"Location: {state.location} | HP: {state.hp}/{state.max_hp}", instant=True)
             inv = format_inventory_display(state)
             inv_title, _, inv_body = inv.partition("\n")
             ui.add_panel(inv_title, inv_body)
             recap = generate_recap(client, state, hot_context, config.MODEL_SUMMARY, session_stats)
             if recap:
-                ui.add_system("\nPreviously...")
-                ui.add_narrative(recap)
+                ui.add_system("\nPreviously...", instant=True)
+                ui.add_narrative(recap, instant=True)
         else:
             ui.add_system("Save could not be loaded. Starting new game.")
             state, hot_context = new_game(ui, client, system_prompt)
@@ -1034,12 +1072,12 @@ def game_thread(ui: GameUI):
         )
         _maybe_chronicle(event=significant_event)
         # Let the world move when time passes (travel, rest) or on the soft cadence.
-        _maybe_world_tick(event=sc.action_type in ("medium", "long"))
+        _maybe_world_tick(event=sc.action_type in ("medium", "long") or bool(sc.set_time_of_day))
 
 
 # ── new game ──────────────────────────────────────────────────────────────────
 
-def new_game(ui: GameUI, client, system_prompt) -> tuple:
+def new_game(ui: GameUIProtocol, client, system_prompt) -> tuple:
     global session_stats
     session_stats = SessionStats()
     _debug_log_clear()
@@ -1129,38 +1167,3 @@ def new_game(ui: GameUI, client, system_prompt) -> tuple:
     hot_context.append(f"[Scene]: {seed_response.narrative}")
 
     return state, hot_context
-
-
-# ── entry point ───────────────────────────────────────────────────────────────
-
-def main():
-    from game.ui import apply_theme
-    apply_theme(config.UI_THEME)
-    ui = GameUI()
-
-    def safe_game_thread():
-        try:
-            # game_thread returns "menu" when the player picks Save & main menu;
-            # loop so they land back on the opening menu instead of exiting.
-            while ui.running and game_thread(ui) == "menu":
-                pass
-        except Exception:
-            import traceback
-            traceback.print_exc()
-            ui.running = False
-            ui._release_all_waiters()
-
-    thread = threading.Thread(target=safe_game_thread, daemon=True)
-    thread.start()
-
-    while ui.running:
-        dt = ui.clock.tick(60) / 1000.0
-        ui.handle_events()
-        ui.tick(dt)
-        ui.render()
-
-    pygame.quit()
-
-
-if __name__ == "__main__":
-    main()

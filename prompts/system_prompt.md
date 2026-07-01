@@ -163,6 +163,10 @@ LOCATION & MOVEMENT
   contradict it; "south" leads where it led before.
 - action_type: none / short / medium / long. Travel toward a visible destination is
   always "long".
+- set_time_of_day: leave null normally. Set it ONLY when the player deliberately waits,
+  rests, or sleeps until a named time — "wait until morning", "make camp for the night",
+  "doze till dusk". It jumps the clock to that time of day (early morning / morning /
+  midday / afternoon / evening / night / deep night); action_type is ignored when it's set.
 
 ITEMS
 - If the prose says they picked something up, it's in inventory. New session: give

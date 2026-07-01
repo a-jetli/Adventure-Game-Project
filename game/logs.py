@@ -11,15 +11,35 @@ from .engine import (
 FILE_LOCK = threading.RLock()
 
 
-LOGS_DIR = "logs"
-REGIONS_DIR = os.path.join(LOGS_DIR, "regions")
-NPCS_DIR = os.path.join(LOGS_DIR, "npcs")
-EVENTS_DIR = os.path.join(LOGS_DIR, "events")
-WORLD_FILE = os.path.join(LOGS_DIR, "world.md")
-SESSION_FILE = os.path.join(LOGS_DIR, "session.md")
-SAVE_FILE = os.path.join(LOGS_DIR, "save.json")  # legacy single-slot path
-SAVES_DIR = os.path.join(LOGS_DIR, "saves")       # one file per named slot
-BOOKS_DIR = os.path.join(LOGS_DIR, "books")       # exported, human-readable books
+# ── data root (per-session isolation) ──────────────────────────────────────────
+# Every save/log/book/stat path derives from a single root. It defaults to ./logs
+# (unchanged for local desktop play), but the web demo launches each browser session
+# in its own process with a unique GAME_DATA_DIR (e.g. sessions/<uuid>/), so two
+# visitors never collide and one can't read another's saves. `set_data_dir()` lets a
+# host (or a test) repoint the whole tree at runtime; all module globals below are
+# reassigned, and every function reads them live, so the switch is total.
+
+def set_data_dir(root: str) -> None:
+    """Point all save/log/book/stat paths at `root`. Reassigns the module globals so
+    functions here (and `logs.X` references elsewhere) pick up the new location."""
+    global DATA_DIR, LOGS_DIR, REGIONS_DIR, NPCS_DIR, EVENTS_DIR, WORLD_FILE
+    global SESSION_FILE, SAVE_FILE, SAVES_DIR, BOOKS_DIR, DEBUG_FILE, STATS_FILE
+    DATA_DIR = LOGS_DIR = root
+    REGIONS_DIR = os.path.join(root, "regions")
+    NPCS_DIR = os.path.join(root, "npcs")
+    EVENTS_DIR = os.path.join(root, "events")
+    WORLD_FILE = os.path.join(root, "world.md")
+    SESSION_FILE = os.path.join(root, "session.md")
+    SAVE_FILE = os.path.join(root, "save.json")    # legacy single-slot path
+    SAVES_DIR = os.path.join(root, "saves")         # one file per named slot
+    BOOKS_DIR = os.path.join(root, "books")         # exported, human-readable books
+    DEBUG_FILE = os.path.join(root, "debug_narrative.txt")  # used by game/driver.py
+    STATS_FILE = os.path.join(root, "session_stats.json")   # used by game/stats.py
+
+
+# Resolve the root once at import from the environment (default ./logs). For the web
+# demo, set GAME_DATA_DIR per connection before launching the process.
+set_data_dir(os.environ.get("GAME_DATA_DIR", "logs"))
 
 
 def init_logs():

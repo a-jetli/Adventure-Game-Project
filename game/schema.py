@@ -88,6 +88,12 @@ class StateChanges(BaseModel):
     combat_triggered: bool = False
     encounter: EnemyDescriptor | None = None
     action_type: Literal["none", "short", "medium", "long"] = "none"
+    # Set ONLY when the action explicitly waits/rests/sleeps until a named time of day
+    # (e.g. "I wait until morning", "we make camp for the night"). Jumps the clock forward
+    # to that time of day; otherwise leave null and let action_type advance time normally.
+    set_time_of_day: Literal[
+        "early morning", "morning", "midday", "afternoon", "evening", "night", "deep night"
+    ] | None = None
     hp_delta: int = 0
     quest_added: Quest | None = None
     quest_updated: QuestUpdate | None = None

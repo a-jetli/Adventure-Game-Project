@@ -149,6 +149,22 @@ class EngineState:
         }
         self.time_of_day = (self.time_of_day + increments.get(action_type, 0.0)) % 24.0
 
+    # Start hour of each time-of-day band (mirror of `_time_label`'s boundaries), so the
+    # narrator can jump the clock to a named time when the player waits/rests/sleeps.
+    _LABEL_START_HOUR = {
+        "early morning": 5.0, "morning": 8.0, "midday": 12.0, "afternoon": 14.0,
+        "evening": 18.0, "night": 21.0, "deep night": 0.0,
+    }
+
+    def set_time_to_label(self, label: str):
+        """Jump the clock *forward* to the start of a named time of day (waiting until
+        morning, sleeping through to night). No-op for an unknown label."""
+        target = self._LABEL_START_HOUR.get((label or "").strip().lower())
+        if target is None:
+            return
+        delta = (target - self.time_of_day) % 24.0   # always move forward to next occurrence
+        self.time_of_day = (self.time_of_day + delta) % 24.0
+
     def apply_state_changes(self, changes):
         # Track how long the player's been parked in one place, so the loop-breaker
         # can fire when a scene starts to stagnate. A genuine move resets it.
@@ -256,7 +272,11 @@ class EngineState:
                         q.status = upd.status
                     break
 
-        self.advance_time(changes.action_type)
+        # A named wait/rest target is authoritative; otherwise advance by the action's pace.
+        if getattr(changes, "set_time_of_day", None):
+            self.set_time_to_label(changes.set_time_of_day)
+        else:
+            self.advance_time(changes.action_type)
         self.session_turn += 1
 
         present = [u.id for u in changes.npcs if u.present]

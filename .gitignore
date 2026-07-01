@@ -11,6 +11,7 @@ theorycrafting.txt
 implementation_details.md
 changelog.md
 TODO.md
+docs/
 
 # CLI-only session recorder + its artifacts (testing tool, never shipped)
 tests/playthrough.py
@@ -21,3 +22,6 @@ tests/.session_hot.json
 tests/.session_meta.json
 # stress-test inputs (gitignored)
 tests/inputs/
+
+# retired pygame front-end (moved out of the tracked tree during the Textual port)
+legacy/

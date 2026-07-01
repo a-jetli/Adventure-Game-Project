@@ -9,8 +9,14 @@ from .stats import CallRecord
 from .config import MODEL_NARRATIVE, MODEL_SUMMARY, reasoning_kwargs
 
 
+# Authored content lives in two sibling trees at the project root: universal model
+# steering in prompts/ (the master prompt + the per-beat playbook), and per-setting
+# blueprint packs in templates/<pack>/. Paths are relative to the working directory
+# (the game is launched from the project root).
 TEMPLATES_DIR = "templates"
-PLAYBOOK_PATH = "playbook.md"
+PROMPTS_DIR = "prompts"
+SYSTEM_PROMPT_PATH = os.path.join(PROMPTS_DIR, "system_prompt.md")
+PLAYBOOK_PATH = os.path.join(PROMPTS_DIR, "playbook.md")
 
 # Sent on the first turn to generate the opening scene. Lean on purpose: the
 # craft guidance now rides in the injected "opening" director's note, so this
@@ -23,7 +29,7 @@ SEED_INSTRUCTION = (
 
 
 def load_system_prompt() -> str:
-    with open("system_prompt.md", "r") as f:
+    with open(SYSTEM_PROMPT_PATH, "r") as f:
         return f.read()
 
 

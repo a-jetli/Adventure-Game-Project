@@ -20,16 +20,31 @@ MODEL_NARRATIVE = "gpt-5.4-nano"
 MODEL_SUMMARY = "gpt-4o-mini"
 REASONING_EFFORT = "low"
 UI_THEME = "dark"
+# Repaint cap for the Textual front-end (Textual's own default is 60). We default to
+# 120 so the HP drain / combat telegraph / typewriter render smoothly on a 120Hz panel
+# + fast terminal; idle cost is unchanged (Textual only repaints dirty regions). Set
+# UI_MAX_FPS=60 (or lower) for slow terminals / SSH, or 0 to fall back to Textual's 60.
+UI_MAX_FPS = 120
+# Day/night lighting phase: warm the whole palette a touch by in-game day, cool it
+# by night. On by default; set UI_DAYNIGHT=0 to keep the flat theme.
+UI_DAYNIGHT = True
 
 
 def _read_env():
     global API_KEY, BASE_URL, MODEL_NARRATIVE, MODEL_SUMMARY, REASONING_EFFORT, UI_THEME
+    global UI_MAX_FPS, UI_DAYNIGHT
     API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
     BASE_URL = os.getenv("LLM_BASE_URL") or None
     MODEL_NARRATIVE = os.getenv("MODEL_NARRATIVE", "gpt-5.4-nano")
     MODEL_SUMMARY = os.getenv("MODEL_SUMMARY", "gpt-4o-mini")
     REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "low")
     UI_THEME = os.getenv("UI_THEME", "dark")
+    try:
+        UI_MAX_FPS = int(os.getenv("UI_MAX_FPS", "120") or 120)
+    except ValueError:
+        UI_MAX_FPS = 120
+    UI_DAYNIGHT = (os.getenv("UI_DAYNIGHT", "1").strip().lower()
+                   not in {"0", "false", "no", "off"})
 
 
 # Load .env here so config is correct no matter which entry point imports it.
