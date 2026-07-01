@@ -76,4 +76,4 @@ The game keeps everything under a `logs/` folder it creates, mostly plain Markdo
 ## Notes
 
 - Any OpenAI compatible provider works (Gemini, OpenRouter, Anthropic's compatible endpoint, local Ollama). The one catch is that it leans on OpenAI's "structured output" feature, so a provider without it may complain.
-- The original version used a pygame window instead of the terminal. It still works and is kept in `legacy/`.
+
