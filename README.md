@@ -1,8 +1,8 @@
 # Text based adventure game
 
-A text RPG in Python where an LLM plays dungeon master. You describe the kind of world you want (low fantasy, cyberpunk, age of sail, anything at all) and then do whatever you like inside it. The model writes the world, the scenes, and the characters, and decides when a fight breaks out.
+A text based RPG where an LLM plays the role of narrator. You decide your characters name, the setting, the genre (Fantasy? Cyberpunk? Pirate ships?) and the model takes over the rest. The model writes the world, the scenes, and the characters, and decides when a fight breaks out. There is no set script, you have complete narrative freedom and the model will build the world around your decisions and remembers places and decisions you make along the way.
 
-> **Work in progress.** A personal project I keep tinkering with. It plays start to finish, but there are rough edges, and how good it feels depends on the model you point it at.
+> **Work in progress.** This is a personal project I'm still working on. Currently, the default LLM model call is to GPT 5.4-nano to preserve low costs and allow me to test runs quickly. Upgrading the model to 5.4-mini or higher noticeably improved narrative quality but comes at a higher cost and potentially higher latency. Changing the model is an easy swap so you can bring your own model.
 
 ## Requirements
 
@@ -12,9 +12,7 @@ A text RPG in Python where an LLM plays dungeon master. You describe the kind of
   - `textual` runs the terminal UI
   - `pydantic` defines and validates the game state
   - `python-dotenv` reads your `.env` settings
-  - `openai` talks to the model (any OpenAI compatible endpoint uses it)
-
-The pygame client in `legacy/` also needs `pygame`, but only if you want to run that older version.
+  - `openai` talks to the model (any OpenAI compatible endpoint uses it
 
 ## Run it
 
@@ -25,7 +23,7 @@ pip install -r requirements.txt
 python3 game_tui.py
 ```
 
-It runs in your terminal. On the first launch it asks you to pick a provider and paste your API key, then saves that to a local `.env` for next time.
+It runs in your terminal. On the first launch it asks you to pick a provider and paste your API key, then saves that to a local `.env` for next time. You can also configure this in the source code.
 
 ## Choosing a model
 
@@ -35,7 +33,7 @@ The key and model live in a `.env` file (the first run creates it, or copy `.env
 
 ### The game owns the state, the model tells the story
 
-The model never edits the game state directly. Each turn it returns a structured form describing what changed (location, HP, inventory, the people in the scene, world events, quests), and the engine validates and applies those changes itself. The model's API enforces the shape of that form, so the reply always fits and can never come back malformed. This keeps the storytelling free while the game stays the authority on what is true, which is what stops the model from teleporting the player or conjuring a legendary sword out of nothing.
+The model never edits the game state directly. Each turn it returns a structured form describing what changed (location, HP, inventory, the people in the scene, world events, quests), and the engine validates and applies those changes itself. The model's API enforces the return format. This keeps the storytelling free while the game stays the authority on what is true, which is what stops the model from teleporting the player or hallucinating background up.
 
 ### How the model is steered
 
@@ -51,7 +49,7 @@ A turn runs through one loop: read input, check for a local command, otherwise s
 
 ### Combat
 
-Combat is resolved in code: attack, use an item, or flee, with the dice rolled by the engine and buffs and item effects applied locally. The model only narrates how a fight opens and how it settles. A defeat is not the end of the game; the player comes to wounded or robbed and the story carries on from the setback. It is deliberately simple for now, an early version that covers the basics rather than a deep tactical system.
+Combat is resolved in code: attack, use an item, or flee, with the dice rolled by the engine and buffs and item effects applied locally. The model only narrates how a fight opens and how it settles. A defeat is not the end of the game; the player comes to wounded or robbed and the story carries on from the setback. It's really simple for now, but its a priority area to expand in the future.
 
 ### A world that keeps moving
 
@@ -63,7 +61,7 @@ The world's genre is chosen at character creation. The engine itself is indiffer
 
 ### The terminal interface
 
-The front end is built with Textual and runs entirely in the terminal. Narration types out as it arrives and any key fast forwards it, names and places and items are picked out in colour, and a status bar across the top tracks HP, location, time of day, and gear. A sidebar of collapsible cards shows the current place and time, a list of people, places, and items to inspect, and the active quests. Menus and the combat screen appear as pop up dialogs driven by the keyboard or mouse, and three colour themes ship (Dark, Light, Earthy), switchable while playing.
+The front end is built with Textual and runs in the terminal or terminal replacement app of your choice. Narration types out as it arrives and any key fast forwards it, names and places and items are picked out in colour, and a status bar across the top tracks HP, location, time of day, and gear. A sidebar of collapsible cards shows the current place and time, a list of people, places, and items to inspect, and the active quests. Menus and the combat screen appear as pop up dialogs driven by the keyboard or mouse, and three colour themes ship (Dark, Light, Earthy), switchable while playing.
 
 ## Saves and logs
 
@@ -73,7 +71,4 @@ The game keeps everything under a `logs/` folder it creates, mostly plain Markdo
 
 `python -m tests.eval --engine-only` is free and checks the game logic. `python -m tests.eval` also runs live checks against the model, handy after editing the prompts.
 
-## Notes
-
-- Any OpenAI compatible provider works (Gemini, OpenRouter, Anthropic's compatible endpoint, local Ollama). The one catch is that it leans on OpenAI's "structured output" feature, so a provider without it may complain.
 
